@@ -1,0 +1,91 @@
+.term-root { background: var(--term-surface); }
+.term-root.term-frameless { padding-top: 26px; }
+
+.term-root .qx-side-list .cmp-row { width: 100%; padding: 6px 8px; }
+.term-root .qx-side-list .qx-side-label { flex: 1; min-width: 0; }
+.term-tab-x {
+  width: 18px; height: 18px; flex: none; line-height: 1;
+  border: 0; background: transparent; color: inherit; border-radius: 50%;
+  font-size: 0.9rem; cursor: pointer; opacity: .55;
+}
+.term-tab-x:hover { background: color-mix(in srgb, var(--destructive) 18%, transparent); opacity: 1; }
+
+.term-main { flex: 1; min-height: 0; position: relative; display: flex; }
+.term-grids { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.term-grid { flex: 1; min-width: 0; min-height: 0; display: grid; gap: 1px; background: var(--border); }
+.term-pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; background: transparent; }
+.term-pane.active { outline: 1px solid color-mix(in srgb, var(--primary) 55%, transparent); outline-offset: -1px; }
+.term-pane-view { flex: 1; min-width: 0; min-height: 0; padding: 6px 8px; box-sizing: border-box; }
+.term-pane-view > .xterm { width: 100%; height: 100%; }
+.term-pane-view .xterm-viewport { overflow-y: auto; }
+.term-pane-view .xterm-screen { user-select: text; }
+.term-pane-badge {
+  position: absolute; top: 4px; right: 6px; pointer-events: none;
+  padding: 0 4px; border-radius: 4px; font-size: 0.66rem;
+  color: var(--muted-foreground); background: var(--card);
+}
+.term-pane.active .term-pane-badge { display: none; }
+.term-pane.term-ligatures .xterm {
+  font-variant-ligatures: contextual common-ligatures;
+  font-feature-settings: 'liga' 1, 'calt' 1;
+}
+
+.term-pane-view .xterm-viewport::-webkit-scrollbar { width: 10px; }
+.term-pane-view .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.term-pane-view .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid transparent; background-clip: content-box; border-radius: 999px;
+}
+.term-pane-view .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+.term-search {
+  position: absolute; top: 8px; right: 16px; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 999px;
+  background-color: var(--glass-bg-strong); background-image: var(--glass-sheen);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
+}
+.term-search:focus-within {
+  border-color: color-mix(in srgb, var(--ring) 55%, var(--glass-border));
+  box-shadow: var(--glass-highlight), var(--glass-shadow), 0 0 0 3px var(--ring-halo);
+}
+.term-search-ic { display: inline-flex; color: var(--muted-foreground); }
+.term-search-ic .qicon { width: 15px; height: 15px; }
+.term-search-input {
+  width: 220px; height: 26px; border: 0; outline: none;
+  background: transparent; color: var(--foreground); font-size: 0.76rem;
+}
+.term-search-flag {
+  height: 22px; min-width: 26px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 999px;
+  background: transparent; color: var(--muted-foreground); font-size: 0.7rem;
+}
+.term-search-flag.active {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 34%, transparent);
+  color: var(--primary);
+}
+.term-search-count { min-width: 40px; text-align: center; font-size: 0.7rem; color: var(--muted-foreground); }
+.term-search-count-empty { color: var(--destructive); }
+.term-search-nav, .term-search-x {
+  width: 22px; height: 22px; line-height: 1; cursor: pointer;
+  border: 0; border-radius: 50%; background: transparent; color: var(--muted-foreground);
+}
+.term-search-nav:hover, .term-search-x:hover { background: var(--muted); color: var(--foreground); }
+
+.term-s-path { max-width: 42%; overflow: hidden; text-overflow: ellipsis; }
+
+.term-set-body { display: flex; flex-direction: column; gap: 14px; }
+.term-set-sec { display: flex; flex-direction: column; gap: 6px; }
+.term-set-item { display: flex; flex-direction: column; gap: 3px; }
+.term-set-hint { font-size: 0.72rem; color: var(--muted-foreground); }
+
+@media (max-width: 760px) {
+  .term-root .term-tab-x { display: none; }
+}

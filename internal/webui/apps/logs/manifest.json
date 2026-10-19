@@ -1,0 +1,20 @@
+{
+  "id": "logs",
+  "name": "审计日志",
+  "nameKey": "core.app.logs.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "查看各应用的操作记录、权限申请与授权历史",
+  "descriptionKey": "core.app.logs.desc",
+  "author": "QxSSH",
+  "icon": "logs",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["logs", "audit", "rizhi", "shenji", "权限", "操作记录"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 960, "height": 640, "minWidth": 640, "minHeight": 420 },
+  "permissions": ["logs:read", "logs:readSensitive", "logs:archive", "logs:clear", "logs:settings:read", "logs:settings:write", "logs:verbose", "audit:note"],
+  "systemApp": true,
+  "disableable": true
+}

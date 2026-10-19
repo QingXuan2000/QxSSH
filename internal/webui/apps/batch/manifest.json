@@ -1,0 +1,19 @@
+{
+  "id": "batch",
+  "name": "批量执行",
+  "nameKey": "core.app.batch.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "批量执行命令：多主机并行运行并汇总结果",
+  "descriptionKey": "core.app.batch.desc",
+  "author": "QxSSH",
+  "icon": "batch",
+  "category": "工具",
+  "categoryKey": "core.category-tool",
+  "keywords": ["batch", "exec", "piliang"],
+  "entry": "index.html",
+  "preferredSize": { "width": 820, "height": 620, "minWidth": 820, "minHeight": 360 },
+  "permissions": ["hosts:read", "exec:run"],
+  "systemApp": true,
+  "disableable": true
+}

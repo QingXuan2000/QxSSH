@@ -1,0 +1,73 @@
+html, body { height: 100%; }
+body {
+  background: transparent;
+  overflow: hidden;
+}
+.qx-app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.qx-app-fill { flex: 1; min-height: 0; }
+.qx-app-bar {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-bottom: 1px solid var(--hairline);
+}
+.qx-app-bar-end { margin-left: auto; }
+.qx-app-scroll { flex: 1; min-height: 0; overflow: auto; }
+.qx-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 28px 16px; text-align: center; color: var(--muted-foreground); font-size: 0.8rem;
+}
+.qx-spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-top-color: var(--primary);
+  animation: qx-spin .8s linear infinite;
+}
+.qx-status-bar {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  min-height: 26px; border-top: 1px solid var(--hairline);
+  color: var(--muted-foreground);
+}
+.qx-list-head {
+  background: var(--card);
+  border-bottom: 1px solid var(--hairline);
+}
+.qx-surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2xs);
+}
+.qx-code-surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.55);
+  color: var(--foreground);
+}
+.qx-sidebar-surface {
+  background: var(--glass-bg-soft);
+  border-color: var(--hairline);
+}
+.qx-sudo-err {
+  margin-top: 8px; font-size: 0.74rem; color: var(--destructive);
+  min-height: 1.1em; word-break: break-word;
+}
+.qx-glass-panel {
+  background-color: var(--glass-bg-content);
+  background-image: var(--glass-sheen);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight), var(--glass-shadow-sm);
+  backdrop-filter: blur(var(--glass-blur-content)) saturate(var(--glass-saturate-content));
+  -webkit-backdrop-filter: blur(var(--glass-blur-content)) saturate(var(--glass-saturate-content));
+}
+@keyframes qx-spin { to { transform: rotate(360deg); } }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .qx-glass-panel, .glass {
+    background-color: var(--card);
+    background-image: none;
+  }
+}

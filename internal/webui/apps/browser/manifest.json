@@ -1,0 +1,22 @@
+{
+  "id": "browser",
+  "name": "浏览器",
+  "nameKey": "core.app.browser.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "内置浏览器：访问内网 Web 管理与设备控制台",
+  "descriptionKey": "core.app.browser.desc",
+  "author": "QxSSH",
+  "icon": "browser",
+  "category": "网络",
+  "categoryKey": "core.category-network",
+  "keywords": ["browser", "web", "liulanqi"],
+  "entry": "index.html",
+  "preferredSize": { "width": 1024, "height": 680, "minWidth": 560, "minHeight": 360 },
+  "permissions": ["webproxy:start", "webproxy:stop", "local:read", "local:write", "local:hostinfo", "local:exec", "tunnel:local", "exec:run", "hosts:read"],
+  "apis": [
+    { "name": "open", "description": "Open an address: { url, mode?: 'socks'|'iframe' } -> { mode, proxy, url }", "version": "1", "needsWindow": true, "launch": "window", "perm": "term:open" }
+  ],
+  "systemApp": true,
+  "disableable": true
+}

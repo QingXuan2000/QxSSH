@@ -1,0 +1,29 @@
+{
+  "id": "terminal",
+  "name": "终端",
+  "nameKey": "core.app.terminal.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "SSH 终端：多标签、分屏、会话保存与自动重连",
+  "descriptionKey": "core.app.terminal.desc",
+  "author": "QxSSH",
+  "icon": "terminal",
+  "category": "工具",
+  "categoryKey": "core.category-tool",
+  "keywords": ["shell", "ssh", "zhongduan", "console"],
+  "entry": "index.html",
+  "preferredSize": { "width": 960, "height": 600, "minWidth": 520, "minHeight": 300 },
+  "permissions": ["term:open", "hosts:read"],
+  "apis": [
+    {
+      "name": "open",
+      "description": "Open a terminal tab, optionally typing a command: { cwd?, command?, name? } -> { tabId, paneId }",
+      "version": "1",
+      "needsWindow": true,
+      "launch": "window",
+      "perm": "term:open"
+    }
+  ],
+  "systemApp": true,
+  "disableable": true
+}

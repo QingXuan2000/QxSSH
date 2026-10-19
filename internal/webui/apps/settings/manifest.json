@@ -1,0 +1,19 @@
+{
+  "id": "settings",
+  "name": "设置",
+  "nameKey": "core.app.settings.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "系统设置：主题、壁纸、任务栏与偏好",
+  "descriptionKey": "core.app.settings.desc",
+  "author": "QxSSH",
+  "icon": "settings",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["settings", "shezhi", "preference", "theme", "wallpaper"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 900, "height": 620, "minWidth": 560, "minHeight": 380 },
+  "permissions": ["ui:settings", "prefs:read", "prefs:write", "perm:read", "perm:grant", "perm:revoke", "perm:clear", "hosts:read", "apps:list", "local:hostinfo", "local:read", "local:write", "local:mkdir", "local:rename", "local:delete"],
+  "systemApp": true
+}

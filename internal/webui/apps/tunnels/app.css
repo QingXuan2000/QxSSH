@@ -1,0 +1,30 @@
+.app-root { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.app-root > .qx-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+.qx-shell > .cmp-sidebar { min-height: 0; }
+
+.tn-desc {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.78rem; color: var(--muted-foreground);
+}
+.tn-desc > span:last-child { min-width: 0; }
+.tn-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px; margin-top: 4px;
+}
+.tn-grid .cmp-field-control > .input { flex: 1 1 auto; min-width: 0; }
+.tn-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
+.tn-empty-desc { font-size: 0.74rem; opacity: 0.85; }
+
+.tn-type {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600;
+  background: var(--muted); color: var(--muted-foreground);
+}
+.tn-type-local { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary); }
+.tn-type-remote { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.tn-type-dynamic { background: color-mix(in srgb, var(--chart-5) 18%, transparent); color: var(--chart-5); }
+
+@media (max-width: 560px) {
+  .tn-grid { grid-template-columns: minmax(0, 1fr); }
+}

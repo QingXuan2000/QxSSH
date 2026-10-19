@@ -1,0 +1,19 @@
+{
+  "id": "store",
+  "name": "应用管理器",
+  "nameKey": "core.app.store.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "浏览、安装、启用/禁用与卸载应用",
+  "descriptionKey": "core.app.store.desc",
+  "author": "QxSSH",
+  "icon": "package",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["store", "app", "manager", "install", "uninstall", "enable", "disable", "应用", "管理", "安装", "卸载", "启用", "禁用"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 880, "height": 580, "minWidth": 560, "minHeight": 380 },
+  "permissions": ["apps:list", "apps:validate", "apps:install", "apps:link", "apps:uninstall", "apps:toggle", "audit:note"],
+  "systemApp": true
+}

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN" translate="no" class="notranslate">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google" content="notranslate">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<title>终端</title>
+<script>(function(){var t='';try{t=new URLSearchParams(location.search).get('theme')||''}catch(e){}if(t!=='dark'&&t!=='light'){t='';try{var c=localStorage.getItem('qx-prefs-cache');t=(c?(JSON.parse(c)['qx-theme']||''):'')||localStorage.getItem('qx-theme')||''}catch(e){}}var d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)})()</script>
+<link rel="stylesheet" href="/assets/css/fonts.css">
+<link rel="stylesheet" href="/assets/css/variables.css">
+<link rel="stylesheet" href="/assets/css/global.css">
+<link rel="stylesheet" href="/assets/css/app-page.css">
+<link rel="stylesheet" href="/assets/css/components.css">
+<link rel="stylesheet" href="/assets/css/app-shell.css">
+<link rel="stylesheet" href="/assets/vendor/xterm.css">
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<div id="app" class="qx-app-root"></div>
+<script src="/assets/vendor/xterm.js"></script>
+<script src="/assets/vendor/xterm-addon-fit.js"></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

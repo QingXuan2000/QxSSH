@@ -1,0 +1,20 @@
+{
+  "id": "docker",
+  "name": "Docker 管理",
+  "nameKey": "core.app.docker.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "容器、镜像、卷、网络与 Compose 堆栈一站式管理，日志与终端不离开窗口",
+  "descriptionKey": "core.app.docker.desc",
+  "author": "QxSSH",
+  "icon": "docker",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["docker", "container", "compose", "image", "volume", "network"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 1160, "height": 720, "minWidth": 1160, "minHeight": 480 },
+  "permissions": ["hosts:read", "exec:run", "exec:stream", "exec:session", "sudo:request"],
+  "systemApp": true,
+  "disableable": true
+}

@@ -1,0 +1,600 @@
+{
+  "wallpapers": [
+    {
+      "name": "wallpaper-1-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-10-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-2-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-3-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-4-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-5-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-6-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-7-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-8-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-9-light.webp",
+      "theme": "light"
+    },
+    {
+      "name": "wallpaper-1-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-2-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-3-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-4-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-5-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-6-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-7-dark.webp",
+      "theme": "dark"
+    },
+    {
+      "name": "wallpaper-8-dark.webp",
+      "theme": "dark"
+    }
+  ],
+  "textures": [
+    {
+      "name": "4-point-stars",
+      "file": "4-point-stars.svg",
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "anchors-away",
+      "file": "anchors-away.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "architect",
+      "file": "architect.svg",
+      "w": 100,
+      "h": 199
+    },
+    {
+      "name": "autumn",
+      "file": "autumn.svg",
+      "w": 88,
+      "h": 24
+    },
+    {
+      "name": "aztec",
+      "file": "aztec.svg",
+      "w": 32,
+      "h": 64
+    },
+    {
+      "name": "bamboo",
+      "file": "bamboo.svg",
+      "w": 16,
+      "h": 32
+    },
+    {
+      "name": "bank-note",
+      "file": "bank-note.svg",
+      "w": 100,
+      "h": 20
+    },
+    {
+      "name": "bathroom-floor",
+      "file": "bathroom-floor.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "bevel-circle",
+      "file": "bevel-circle.svg",
+      "w": 38,
+      "h": 38
+    },
+    {
+      "name": "boxes",
+      "file": "boxes.svg",
+      "w": 20,
+      "h": 20
+    },
+    {
+      "name": "brick-wall",
+      "file": "brick-wall.svg",
+      "w": 42,
+      "h": 44
+    },
+    {
+      "name": "bubbles",
+      "file": "bubbles.svg",
+      "w": 100,
+      "h": 100
+    },
+    {
+      "name": "cage",
+      "file": "cage.svg",
+      "w": 32,
+      "h": 26
+    },
+    {
+      "name": "charlie-brown",
+      "file": "charlie-brown.svg",
+      "w": 20,
+      "h": 12
+    },
+    {
+      "name": "church-on-sunday",
+      "file": "church-on-sunday.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "circles-and-squares",
+      "file": "circles-and-squares.svg",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "circuit-board",
+      "file": "circuit-board.svg",
+      "w": 304,
+      "h": 304
+    },
+    {
+      "name": "connections",
+      "file": "connections.svg",
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "cork-screw",
+      "file": "cork-screw.svg",
+      "w": 20,
+      "h": 16
+    },
+    {
+      "name": "current",
+      "file": "current.svg",
+      "w": 76,
+      "h": 18
+    },
+    {
+      "name": "curtain",
+      "file": "curtain.svg",
+      "w": 44,
+      "h": 12
+    },
+    {
+      "name": "cutout",
+      "file": "cutout.svg",
+      "w": 48,
+      "h": 48
+    },
+    {
+      "name": "death-star",
+      "file": "death-star.svg",
+      "w": 80,
+      "h": 105
+    },
+    {
+      "name": "diagonal-lines",
+      "file": "diagonal-lines.svg",
+      "w": 6,
+      "h": 6
+    },
+    {
+      "name": "diagonal-stripes",
+      "file": "diagonal-stripes.svg",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "dominos",
+      "file": "dominos.svg",
+      "w": 126,
+      "h": 84
+    },
+    {
+      "name": "endless-clouds",
+      "file": "endless-clouds.svg",
+      "w": 56,
+      "h": 28
+    },
+    {
+      "name": "eyes",
+      "file": "eyes.svg",
+      "w": 20,
+      "h": 12
+    },
+    {
+      "name": "falling-triangles",
+      "file": "falling-triangles.svg",
+      "w": 36,
+      "h": 72
+    },
+    {
+      "name": "fancy-rectangles",
+      "file": "fancy-rectangles.svg",
+      "w": 60,
+      "h": 48
+    },
+    {
+      "name": "flipped-diamonds",
+      "file": "flipped-diamonds.svg",
+      "w": 16,
+      "h": 20
+    },
+    {
+      "name": "floating-cogs",
+      "file": "floating-cogs.svg",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "name": "floor-tile",
+      "file": "floor-tile.svg",
+      "w": 30,
+      "h": 30
+    },
+    {
+      "name": "formal-invitation",
+      "file": "formal-invitation.svg",
+      "w": 100,
+      "h": 18
+    },
+    {
+      "name": "glamorous",
+      "file": "glamorous.svg",
+      "w": 180,
+      "h": 180
+    },
+    {
+      "name": "graph-paper",
+      "file": "graph-paper.svg",
+      "w": 100,
+      "h": 100
+    },
+    {
+      "name": "groovy",
+      "file": "groovy.svg",
+      "w": 24,
+      "h": 40
+    },
+    {
+      "name": "happy-intersection",
+      "file": "happy-intersection.svg",
+      "w": 88,
+      "h": 88
+    },
+    {
+      "name": "heavy-rain",
+      "file": "heavy-rain.svg",
+      "w": 12,
+      "h": 24
+    },
+    {
+      "name": "hexagons",
+      "file": "hexagons.svg",
+      "w": 28,
+      "h": 49
+    },
+    {
+      "name": "hideout",
+      "file": "hideout.svg",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "houndstooth",
+      "file": "houndstooth.svg",
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "i-like-food",
+      "file": "i-like-food.svg",
+      "w": 260,
+      "h": 260
+    },
+    {
+      "name": "intersecting-circles",
+      "file": "intersecting-circles.svg",
+      "w": 30,
+      "h": 30
+    },
+    {
+      "name": "jigsaw",
+      "file": "jigsaw.svg",
+      "w": 192,
+      "h": 192
+    },
+    {
+      "name": "jupiter",
+      "file": "jupiter.svg",
+      "w": 52,
+      "h": 52
+    },
+    {
+      "name": "kiwi",
+      "file": "kiwi.svg",
+      "w": 34,
+      "h": 44
+    },
+    {
+      "name": "leaf",
+      "file": "leaf.svg",
+      "w": 80,
+      "h": 40
+    },
+    {
+      "name": "line-in-motion",
+      "file": "line-in-motion.svg",
+      "w": 120,
+      "h": 120
+    },
+    {
+      "name": "lips",
+      "file": "lips.svg",
+      "w": 112,
+      "h": 92
+    },
+    {
+      "name": "lisbon",
+      "file": "lisbon.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "melt",
+      "file": "melt.svg",
+      "w": 24,
+      "h": 20
+    },
+    {
+      "name": "moroccan",
+      "file": "moroccan.svg",
+      "w": 80,
+      "h": 88
+    },
+    {
+      "name": "morphing-diamonds",
+      "file": "morphing-diamonds.svg",
+      "w": 60,
+      "h": 60
+    },
+    {
+      "name": "overcast",
+      "file": "overcast.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "overlapping-circles",
+      "file": "overlapping-circles.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "overlapping-diamonds",
+      "file": "overlapping-diamonds.svg",
+      "w": 48,
+      "h": 64
+    },
+    {
+      "name": "overlapping-hexagons",
+      "file": "overlapping-hexagons.svg",
+      "w": 50,
+      "h": 40
+    },
+    {
+      "name": "parkay-floor",
+      "file": "parkay-floor.svg",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "piano-man",
+      "file": "piano-man.svg",
+      "w": 70,
+      "h": 46
+    },
+    {
+      "name": "pie-factory",
+      "file": "pie-factory.svg",
+      "w": 60,
+      "h": 60
+    },
+    {
+      "name": "pixel-dots",
+      "file": "pixel-dots.svg",
+      "w": 16,
+      "h": 16
+    },
+    {
+      "name": "plus",
+      "file": "plus.svg",
+      "w": 60,
+      "h": 60
+    },
+    {
+      "name": "polka-dots",
+      "file": "polka-dots.svg",
+      "w": 20,
+      "h": 20
+    },
+    {
+      "name": "rails",
+      "file": "rails.svg",
+      "w": 20,
+      "h": 10
+    },
+    {
+      "name": "rain",
+      "file": "rain.svg",
+      "w": 12,
+      "h": 16
+    },
+    {
+      "name": "random-shapes",
+      "file": "random-shapes.svg",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "name": "rounded-plus-connected",
+      "file": "rounded-plus-connected.svg",
+      "w": 84,
+      "h": 84
+    },
+    {
+      "name": "signal",
+      "file": "signal.svg",
+      "w": 84,
+      "h": 48
+    },
+    {
+      "name": "skulls",
+      "file": "skulls.svg",
+      "w": 180,
+      "h": 180
+    },
+    {
+      "name": "slanted-stars",
+      "file": "slanted-stars.svg",
+      "w": 30,
+      "h": 30
+    },
+    {
+      "name": "squares-in-squares",
+      "file": "squares-in-squares.svg",
+      "w": 70,
+      "h": 70
+    },
+    {
+      "name": "squares",
+      "file": "squares.svg",
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "stamp-collection",
+      "file": "stamp-collection.svg",
+      "w": 77,
+      "h": 107
+    },
+    {
+      "name": "steel-beams",
+      "file": "steel-beams.svg",
+      "w": 42,
+      "h": 58
+    },
+    {
+      "name": "stripes",
+      "file": "stripes.svg",
+      "w": 40,
+      "h": 1
+    },
+    {
+      "name": "temple",
+      "file": "temple.svg",
+      "w": 152,
+      "h": 152
+    },
+    {
+      "name": "texture",
+      "file": "texture.svg",
+      "w": 4,
+      "h": 4
+    },
+    {
+      "name": "tic-tac-toe",
+      "file": "tic-tac-toe.svg",
+      "w": 64,
+      "h": 64
+    },
+    {
+      "name": "tiny-checkers",
+      "file": "tiny-checkers.svg",
+      "w": 8,
+      "h": 8
+    },
+    {
+      "name": "topography",
+      "file": "topography.svg",
+      "w": 600,
+      "h": 600
+    },
+    {
+      "name": "volcano-lamp",
+      "file": "volcano-lamp.svg",
+      "w": 48,
+      "h": 32
+    },
+    {
+      "name": "wallpaper",
+      "file": "wallpaper.svg",
+      "w": 84,
+      "h": 16
+    },
+    {
+      "name": "wiggle",
+      "file": "wiggle.svg",
+      "w": 52,
+      "h": 26
+    },
+    {
+      "name": "x-equals",
+      "file": "x-equals.svg",
+      "w": 48,
+      "h": 48
+    },
+    {
+      "name": "yyy",
+      "file": "yyy.svg",
+      "w": 60,
+      "h": 96
+    },
+    {
+      "name": "zig-zag",
+      "file": "zig-zag.svg",
+      "w": 40,
+      "h": 12
+    }
+  ]
+}

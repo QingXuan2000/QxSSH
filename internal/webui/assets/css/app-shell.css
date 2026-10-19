@@ -1,0 +1,36 @@
+.qx-shell {
+  height: 100%; display: flex; overflow: hidden; color: var(--card-foreground);
+}
+.qx-shell > .cmp-sidebar {
+  flex: none; width: 172px;
+  border-right: 1px solid var(--hairline);
+  background: var(--glass-bg-soft);
+  border-radius: 0; padding: 14px 10px;
+  overflow-y: auto; overflow-x: hidden; min-height: 0;
+}
+
+.qx-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.qx-scroll {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 16px 18px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.qx-scroll > .cmp-card { flex: 0 0 auto; }
+.qx-scroll > .qx-card-fill {
+  flex: 1 1 auto; min-height: 240px;
+  display: flex; flex-direction: column;
+}
+
+@media (max-width: 560px) {
+  .qx-shell > .cmp-sidebar { width: 58px; padding: 14px 6px; }
+  .qx-shell .qx-side-list .cmp-row { justify-content: center; padding: 9px 0; }
+  .qx-shell .qx-side-list .qx-side-label,
+  .qx-shell .qx-side-list .qx-count { display: none; }
+  .qx-shell .qx-side-head span { display: none; }
+  .qx-scroll { padding: 12px; }
+  .qx-err { margin: 12px 14px 0; }
+  .qx-status { padding: 0 14px; }
+}

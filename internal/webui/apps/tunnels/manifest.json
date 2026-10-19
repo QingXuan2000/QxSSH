@@ -1,0 +1,25 @@
+{
+  "id": "tunnels",
+  "name": "端口转发",
+  "nameKey": "core.app.tunnels.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "SSH 端口转发：打通本地与内网服务",
+  "descriptionKey": "core.app.tunnels.desc",
+  "author": "QxSSH",
+  "icon": "tunnels",
+  "category": "网络",
+  "categoryKey": "core.category-network",
+  "keywords": ["tunnel", "port", "forward", "duankou"],
+  "entry": "index.html",
+  "preferredSize": { "width": 830, "height": 560, "minWidth": 830, "minHeight": 320 },
+  "permissions": ["tunnel:local", "tunnel:start", "tunnel:stop", "tunnel:list", "hosts:read"],
+  "apis": [
+    { "name": "create", "description": "Start a tunnel: { hostId?, type: 'local'|'remote'|'dynamic', bind?, port, target? } -> registry entry (port 0 = pick a free one)", "version": "2", "launch": "background", "perm": "tunnel:local" },
+    { "name": "stop", "description": "Stop a tunnel by id: { id }", "version": "1", "launch": "background", "perm": "tunnel:local" },
+    { "name": "list", "description": "List tunnels of the current workspace (no args)", "version": "1", "launch": "background", "perm": "tunnel:list" },
+    { "name": "whereami", "description": "Current workspace of the tunnels window (no args)", "version": "1" }
+  ],
+  "systemApp": true,
+  "disableable": true
+}

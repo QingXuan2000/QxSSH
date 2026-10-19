@@ -1,0 +1,26 @@
+{
+  "id": "files",
+  "name": "文件管理",
+  "nameKey": "core.app.files.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "SFTP 文件管理：上传下载、重命名、权限查看",
+  "descriptionKey": "core.app.files.desc",
+  "author": "QxSSH",
+  "icon": "files",
+  "category": "文件",
+  "categoryKey": "core.category-file",
+  "keywords": ["sftp", "wenjian", "file", "explorer"],
+  "entry": "index.html",
+  "preferredSize": { "width": 1000, "height": 620, "minWidth": 560, "minHeight": 340 },
+  "permissions": ["server:stat", "server:read", "server:download", "server:upload", "server:mkdir", "server:rename", "server:copy", "server:move", "server:attrs", "server:delete", "hosts:read"],
+  "apis": [
+    { "name": "pick", "description": "Let the user pick a file or directory: { type?: 'file'|'dir', start?, title? } -> path | null", "version": "1", "needsWindow": true, "launch": "window" },
+    { "name": "open", "description": "Navigate to a path (a file opens its directory): { path } -> { hostId, path, isDir }", "version": "1", "needsWindow": true, "launch": "window" },
+    { "name": "stat", "description": "Stat a remote path: { path } -> stat result", "version": "1", "launch": "background", "perm": "server:stat" },
+    { "name": "list", "description": "List a remote directory: { path } -> entries", "version": "1", "launch": "background", "perm": "server:read" },
+    { "name": "whereami", "description": "Current workspace and the path being browsed (no args)", "version": "1" }
+  ],
+  "systemApp": true,
+  "disableable": true
+}

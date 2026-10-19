@@ -1,0 +1,270 @@
+.app-taskmon {
+  height: 100%; display: flex; overflow: hidden; color: var(--card-foreground);
+}
+.app-taskmon > .cmp-sidebar {
+  flex: none; width: 172px;
+  border-right: 1px solid var(--hairline);
+  background: var(--glass-bg-soft);
+  border-radius: 0; padding: 14px 10px;
+  overflow-y: auto; overflow-x: hidden; min-height: 0;
+}
+
+.tmon-content {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.tmon-content-scroll {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 18px 20px 22px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.tmon-content-scroll > .cmp-card { flex: 0 0 auto; }
+.tmon-content-scroll > .tmon-fill {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+.tmon-hint { flex: none; padding: 10px 15px 0; font-size: 0.72rem; color: var(--muted-foreground); min-width: 0; }
+.tmon-empty {
+  padding: 26px 12px; text-align: center;
+  color: var(--muted-foreground); font-size: 0.76rem;
+}
+
+.tmon-fill > .cmp-card-body {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0; padding: 0;
+}
+.tmon-fill .tmon-tools {
+  flex: none; padding: 10px 15px; border-bottom: 1px solid var(--border);
+}
+.tmon-tools { display: flex; align-items: center; gap: 10px; }
+.tmon-tools-l { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+
+.tmon-ws-body {
+  flex: 1; min-height: 0; overflow: hidden;
+  display: flex; gap: 14px; margin-top: 6px; padding: 0 15px 12px;
+}
+.tmon-sensors {
+  flex: 0 0 168px; min-width: 0; min-height: 0; overflow: auto;
+  display: flex; flex-direction: column; gap: 7px;
+  border-right: 1px solid var(--hairline); padding-right: 12px;
+}
+.tmon-sgroup-wrap { flex: none; overflow: hidden; }
+.tmon-sgroup-t {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.66rem; color: var(--muted-foreground); padding: 4px 2px 3px;
+}
+.tmon-sensor {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 7px; border-radius: calc(var(--radius) * 0.6);
+  font-size: 0.75rem; color: var(--foreground);
+  border: 1px solid transparent; cursor: grab; user-select: none;
+}
+.tmon-sensor:hover { background: var(--row-hover); border-color: var(--hairline); }
+.tmon-sensor:active { cursor: grabbing; }
+
+.tmon-grid {
+  flex: 1; min-width: 0; min-height: 0; overflow: auto;
+  display: grid; gap: 10px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+}
+.tmon-grid.is-drop {
+  outline: 2px dashed var(--primary); outline-offset: -6px;
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+.tmon-ws-empty {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 46px 16px; text-align: center;
+  color: var(--muted-foreground); font-size: 0.78rem;
+}
+.tmon-ws-empty .qicon { width: 32px; height: 32px; opacity: 0.45; }
+
+.tmon-w {
+  display: flex; flex-direction: column; min-height: 200px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 0.6); box-shadow: var(--shadow-2xs);
+}
+.tmon-w.is-l { grid-column: 1 / -1; min-height: 268px; }
+.tmon-w-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 6px 7px 11px; border-bottom: 1px solid var(--hairline);
+}
+.tmon-w-title {
+  flex: 1; min-width: 0; font-size: 0.76rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tmon-w-now {
+  flex: none; max-width: 46%; font-size: 0.72rem; color: var(--muted-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tmon-w-acts { display: flex; gap: 1px; flex: none; }
+.tmon-w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 11px 11px; }
+
+.tmon-chart-wrap { position: relative; flex: 1 1 auto; min-height: 104px; }
+.tmon-chart {
+  position: absolute; left: 44px; top: 0;
+  width: calc(100% - 44px); height: calc(100% - 15px);
+  display: block; color: var(--muted-foreground);
+}
+.tmon-axis { opacity: 0.14; }
+.tmon-axis line { stroke-width: 1; }
+.tmon-peak-line { stroke: var(--warning); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }
+
+.tmon-yaxis {
+  position: absolute; left: 0; top: 0; width: 39px;
+  height: calc(100% - 15px);
+  display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end;
+  pointer-events: none;
+  font-size: 0.6rem; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--muted-foreground);
+}
+.tmon-yaxis > span { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tmon-yaxis > span:first-child { transform: translateY(-50%); }
+.tmon-yaxis > span:last-child { transform: translateY(50%); }
+.tmon-yaxis-peak { position: absolute; right: 0; color: var(--warning); transform: translateY(-50%); }
+
+.tmon-xaxis {
+  position: absolute; left: 44px; right: 0; bottom: 0; height: 15px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 0.6rem; color: var(--muted-foreground);
+}
+.tmon-xaxis > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+.tmon-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 0.7rem; color: var(--muted-foreground); }
+.tmon-lg { display: inline-flex; align-items: center; gap: 5px; }
+.tmon-lg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+.tmon-figure {
+  position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column;
+  align-items: flex-start; justify-content: center; gap: 4px; padding-left: 11px;
+}
+.tmon-figure::before {
+  content: ""; position: absolute; left: 0; top: 12%; bottom: 12%;
+  width: 3px; border-radius: 2px; background: var(--border);
+}
+.tmon-figure.warning::before { background: var(--warning); }
+.tmon-figure.danger::before { background: var(--destructive); }
+.tmon-figure-v {
+  font-family: var(--font-mono); font-size: 2rem; font-weight: 650;
+  line-height: 1.05; letter-spacing: -0.02em; color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  display: flex; align-items: baseline; gap: 4px;
+  flex-wrap: wrap; max-width: 100%;
+}
+.tmon-figure-num { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.tmon-figure-u { font-size: 0.95rem; font-weight: 600; letter-spacing: 0; color: var(--muted-foreground); }
+.tmon-figure-sub { font-size: 0.72rem; color: var(--muted-foreground); }
+
+.tmon-off { align-items: center; text-align: center; gap: 7px; }
+.tmon-off-tag {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px; border-radius: 999px;
+  background: var(--muted); color: var(--muted-foreground);
+  font-size: 0.74rem; line-height: 1.35;
+}
+.tmon-off-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  border: 1.5px dashed currentColor; opacity: 0.6;
+}
+.tmon-off-sub { font-size: 0.68rem; color: var(--muted-foreground); opacity: 0.75; }
+
+.tmon-bars { flex: 1; display: flex; flex-direction: column; gap: 7px; justify-content: center; }
+.tmon-bar { display: grid; grid-template-columns: minmax(0, 88px) minmax(0, 1fr) minmax(0, 62px); align-items: center; gap: 8px; font-size: 0.72rem; }
+.tmon-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmon-bar-track { height: 7px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+.tmon-bar-fill { height: 100%; border-radius: 999px; background: var(--primary); }
+.tmon-bar-val { text-align: right; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tmon-log {
+  flex: 1; min-height: 0; margin: 0; overflow: auto;
+  font-family: var(--font-mono); font-size: 0.68rem; line-height: 1.55;
+  color: var(--muted-foreground); white-space: pre;
+  background: var(--muted); border-radius: calc(var(--radius) * 0.6); padding: 7px 9px;
+}
+
+.tmon-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--card); }
+.tmon-head-slot { position: sticky; top: 0; z-index: 3; }
+.tmon-rows > .tmon-row:last-child { border-bottom: 0; }
+
+.tmon-row {
+  padding-left: calc(8px + var(--cmp-tree-indent, 0px));
+  display: grid;
+  grid-template-columns: minmax(150px, 1.7fr) 66px 88px 62px 62px 78px 54px 92px minmax(158px, 2.4fr);
+  align-items: center; gap: 0 8px;
+  min-height: 29px; padding: 0 10px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 0.76rem; color: var(--foreground);
+}
+
+.tmon-row.tmon-head {
+  background: var(--card);
+  min-height: 27px;
+  font-size: 0.7rem; font-weight: 600; color: var(--muted-foreground);
+}
+.tmon-row.tmon-head .tmon-c.is-sort { cursor: pointer; }
+.tmon-row.tmon-head .tmon-c.is-sort:hover { color: var(--foreground); }
+.tmon-row:not(.tmon-head):hover { background: var(--row-hover); }
+
+.tmon-c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tmon-c.tmon-num { text-align: right; font-variant-numeric: tabular-nums; }
+.tmon-c-name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tmon-pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmon-args { color: var(--muted-foreground); font-family: var(--font-mono); font-size: 0.7rem; }
+
+.tmon-meter-cell { position: relative; z-index: 0; }
+.tmon-meter {
+  position: absolute; left: 0; top: 5px; bottom: 5px; width: 0;
+  border-radius: 3px; background: var(--row-active);
+}
+.tmon-meter-cell > span { position: relative; z-index: 1; }
+
+.tmon-tw {
+  width: 18px; height: 18px; flex: none; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--muted-foreground);
+  border-radius: 4px; cursor: pointer;
+}
+.tmon-tw:hover { background: var(--row-hover); color: var(--foreground); }
+.tmon-tw.is-empty, .tmon-tw:not(button) { pointer-events: none; cursor: default; }
+
+.tmon-app-row { grid-template-columns: minmax(200px, 2fr) 74px 74px 74px 106px 106px; }
+.tmon-app-sub {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 26px; font-size: 0.72rem; color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+.tmon-sub-line { display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 26px; }
+.tmon-sub-pid { flex: none; width: 52px; text-align: right; }
+.tmon-sub-user { flex: none; width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmon-sub-args { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tmon-search { flex: 0 1 236px; min-width: 148px; }
+.tmon-chips { flex: 0 1 auto; min-width: 0; }
+.tmon-segbox { flex: none; }
+
+.tmon-ctx { min-width: 246px; max-height: min(74vh, 560px); overflow-y: auto; }
+.tmon-mi-ic {
+  width: 16px; height: 16px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted-foreground);
+}
+.tmon-ctx .menu-item.danger .tmon-mi-ic { color: inherit; }
+.tmon-mi-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmon-mi-hint { flex: none; font-size: 0.68rem; color: var(--glass-text-tertiary); }
+
+@media (max-width: 760px) {
+  .app-taskmon > .cmp-sidebar { width: 58px; padding: 14px 6px; }
+  .app-taskmon .cmp-row { justify-content: center; padding: 9px 0; }
+  .app-taskmon .qx-side-label { display: none; }
+  .app-taskmon .cmp-tab { justify-content: center; padding: 9px 0; }
+  .app-taskmon .cmp-tab span { display: none; }
+  .tmon-content-scroll { padding: 14px; }
+  .tmon-hint { padding: 10px 0 0; }
+  .tmon-ws-body { flex-direction: column; padding: 0 0 12px; }
+  .tmon-sensors {
+    flex: none; width: 100%; max-height: 42%; overflow: auto;
+    padding-right: 0; padding-bottom: 10px;
+    border-right: 0; border-bottom: 1px solid var(--hairline);
+  }
+  .tmon-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+}

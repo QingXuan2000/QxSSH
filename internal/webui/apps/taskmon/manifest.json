@@ -1,0 +1,20 @@
+{
+  "id": "taskmon",
+  "name": "任务管理器",
+  "nameKey": "core.app.taskmon.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "系统负载、进程树与传感器工作表，可提权结束进程",
+  "descriptionKey": "core.app.taskmon.desc",
+  "author": "QxSSH",
+  "icon": "activity",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["task", "renwu", "monitor", "process", "system", "top"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 1080, "height": 680, "minWidth": 640, "minHeight": 420 },
+  "permissions": ["hosts:read", "exec:run", "sudo:request", "sudo:forget"],
+  "systemApp": true,
+  "disableable": true
+}

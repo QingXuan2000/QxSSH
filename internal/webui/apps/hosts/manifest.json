@@ -1,0 +1,19 @@
+{
+  "id": "hosts",
+  "name": "主机管理",
+  "nameKey": "core.app.hosts.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "主机管理：增删改查被控机、凭据与跳板机",
+  "descriptionKey": "core.app.hosts.desc",
+  "author": "QxSSH",
+  "icon": "hosts",
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["host", "zhuji", "server"],
+  "entry": "index.html",
+  "preferredSize": { "width": 1000, "height": 600, "minWidth": 990, "minHeight": 340 },
+  "permissions": ["hosts:read", "hosts:test", "hosts:probe", "hosts:create", "hosts:import", "hosts:update", "hosts:delete", "hosts:credential"],
+  "systemApp": true,
+  "disableable": true
+}
