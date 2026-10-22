@@ -10,6 +10,7 @@ import { esc } from './dom.js';
 import { copyText, task, toast } from './ui.js';
 import { t, tf } from './i18n.js';
 import { focusWindow } from '../app-bridge.js';
+import { getJsonShader } from './shader-registry.js';
 
 function tip(t) {
   return t ? { dataset: { tip: String(t) } } : {};
@@ -716,19 +717,41 @@ function cloneWithClass(vnode, extraClass, style) {
   }, vnode.children);
 }
 
-/** JSON 查看器：节点可折叠，默认按深度展开 */
+/**
+ * JSON 查看器：节点可折叠，默认按深度展开
+ * expandAll 为真时所有分支初始展开；用户手动切换过的节点记在 opened 里作为覆盖项
+ *
+ * keySplit 是可选的正则，用来把「键」拆成两部分：命中位置之前作键名，
+ * 之后作紧随其后的值。用于 systemd critical-chain 这类
+ * 「trim_init.service @19.268s +20.456s」的键——拆开后单元名是键、
+ * 时刻与耗时是值，值槽位不再显示布尔量。正则只需命中分隔处的空白
+ * （如 /\s+/），标记字符留给尾段，着色器才认得出 @ 与 +。
+ *
+ * 着色交由 shader 决定，签名 (text, ctx) => Token[] | null：
+ *   ctx = { slot: 'key' | 'value' | 'root' | 'suffix', key, depth, path }
+ * Token 为 { text, type } 或 { text, class }；type 展开成 qx-tok-<type>。
+ * shader 传字符串时取已注册的具名着色器（见 core/json-shader.js）。
+ * accentKeys 是快捷开关，等价于 shader: timingShader()，保留给只标时刻标记的调用方。
+ */
 export function JsonViewer(props) {
-  const { value, maxDepth = 2, cls = '', rootLabel = '' } = props;
-  const opened = useState(new Set());
-  const toggle = (k) => {
-    const s = new Set(opened.value);
-    if (s.has(k)) s.delete(k);
-    else s.add(k);
+  const {
+    value, maxDepth = 2, expandAll = false, accentKeys = false,
+    shader = null, cls = '', rootLabel = '', keySplit = null,
+  } = props;
+  const paint = resolveShader(shader, accentKeys);
+  const opened = useState(new Map());
+  const isOpen = (path, depth) => {
+    const hit = opened.value.get(path);
+    return hit === undefined ? (expandAll || depth < maxDepth) : hit;
+  };
+  const toggle = (path, depth) => {
+    const s = new Map(opened.value);
+    s.set(path, !isOpen(path, depth));
     opened.next = s;
   };
   return h('div', { class: cx('cmp-json', cls) }, [
     rootLabel ? h('div', { class: 'cmp-json-root', text: rootLabel }) : null,
-    node(null, value, 0),
+    node(null, value, 0, '$root'),
   ].filter(Boolean));
 
   function isBranch(v) { return v !== null && typeof v === 'object'; }
@@ -741,37 +764,104 @@ export function JsonViewer(props) {
     if (Array.isArray(v)) return `[ ${v.length} ]`;
     return `{ ${Object.keys(v || {}).length} }`;
   }
-  function pathKey(key, depth) { return `${depth}:${key}`; }
 
-  function node(key, v, depth) {
+  /**
+   * 把一段文本交给着色器，再压成 vnode 子节点
+   * 着色器返回空则退回单段纯文本，保证无着色器时行为与之前完全一致
+   */
+  function paintNode(text, slot, key, depth, path, baseCls) {
+    const src = String(text);
+    if (!paint) return h('span', { class: baseCls, text: src });
+
+    let toks = null;
+    try {
+      toks = paint(src, { slot, key, depth, path });
+    } catch (e) {
+      toks = null;
+    }
+    if (!Array.isArray(toks) || !toks.length) return h('span', { class: baseCls, text: src });
+
+    return h('span', { class: cx(baseCls, 'cmp-json-shaded') }, toks.map((tk) => h('span', {
+      class: tk.class
+        ? cx(baseCls, tk.class)
+        : cx(baseCls, tk.type && tk.type !== 'text' ? `qx-tok-${tk.type}` : ''),
+      text: tk.text,
+    })));
+  }
+
+  function keyNode(key, depth, path) {
+    return paintNode(String(key), 'key', key, depth, path, 'cmp-json-key');
+  }
+
+  /**
+   * 按 keySplit 把键拆成「键名 + 尾段」
+   * 正则只匹配分隔处（如空白），分隔符本身丢弃：
+   *   'trim_init.service @19.268s +20.456s'  →  head 'trim_init.service'  tail '@19.268s +20.456s'
+   * 不匹配时整串作键名，行为与未传 keySplit 一致
+   */
+  function splitKey(key) {
+    if (key == null) return { head: key, tail: '' };
+    const src = String(key);
+    if (!keySplit) return { head: src, tail: '' };
+    let m = null;
+    try { m = new RegExp(keySplit.source, keySplit.flags.replace(/[gy]/g, '')).exec(src); } catch (e) { m = null; }
+    if (!m || !m[0]) return { head: src, tail: '' };
+    return { head: src.slice(0, m.index), tail: src.slice(m.index + m[0].length) };
+  }
+
+  function node(key, v, depth, path) {
     const branch = isBranch(v);
-    const path = pathKey(key, depth);
-    const open = depth < maxDepth || opened.value.has(path);
+    const open = isOpen(path, depth);
+    const { head, tail } = splitKey(key);
+    // 有尾段说明键自带展示文案：冒号照常补在键后，尾段占据值的位置，
+    // 分支的 { n } 计数与叶子的布尔量都不再需要
+    const hasTail = !!tail;
     return h('div', { class: 'cmp-json-node' }, [
       h('div', { class: 'cmp-json-row' }, [
         h('button', {
           class: cx('cmp-json-tw', !branch && 'is-empty', open && 'open'),
           type: 'button',
           html: branch ? icon(open ? 'chevron-down' : 'chevron-right', 'qicon-sm') : '',
-          onClick: (e) => { e.stopPropagation(); if (branch) toggle(path); },
+          onClick: (e) => { e.stopPropagation(); if (branch) toggle(path, depth); },
         }),
-        key != null ? h('span', { class: 'cmp-json-key', text: String(key) }) : null,
-        key != null && branch ? h('span', { class: 'cmp-json-colon', text: ':' }) : null,
-        branch ? h('span', { class: 'cmp-json-summary', text: open ? '' : preview(v) }) : null,
-        branch ? null : h('span', {
-          class: `cmp-json-val cmp-json-${typeOf(v)}`,
-          text: typeof v === 'string' ? `"${v}"` : String(v),
-        }),
-      ]),
-      branch && open ? h('div', { class: 'cmp-json-kids' }, childNodes(key, v, depth)) : null,
+        key != null ? keyNode(head, depth, path) : null,
+        key != null && (branch || hasTail) ? h('span', { class: 'cmp-json-colon', text: ':' }) : null,
+        branch && !hasTail ? h('span', { class: 'cmp-json-summary', text: open ? '' : preview(v) }) : null,
+        hasTail
+          ? paintNode(tail, 'suffix', head, depth, path, 'cmp-json-val cmp-json-suffix')
+          // 启用 keySplit 后键本身就是完整标签，叶子上的结构占位值一律不显示
+          : branch || keySplit ? null : paintNode(
+            typeof v === 'string' ? `"${v}"` : String(v),
+            'value', key, depth, path,
+            `cmp-json-val cmp-json-${typeOf(v)}`,
+          ),
+      ].filter(Boolean)),
+      branch && open ? h('div', { class: 'cmp-json-kids' }, childNodes(v, depth, path)) : null,
     ].filter(Boolean));
   }
 
-  function childNodes(key, v, depth) {
+  function childNodes(v, depth, path) {
     return Array.isArray(v)
-      ? v.map((x, i) => node(i, x, depth + 1))
-      : Object.entries(v).map(([k, x]) => node(k, x, depth + 1));
+      ? v.map((x, i) => node(i, x, depth + 1, `${path}/${i}`))
+      : Object.entries(v).map(([k, x], i) => node(k, x, depth + 1, `${path}/${i}`));
   }
+}
+
+/**
+ * 解析 shader 参数：函数直接用，字符串查注册表，accentKeys 作为兜底
+ * 拿不到可用着色器时返回 null，调用方退回纯文本渲染
+ */
+function resolveShader(shader, accentKeys) {
+  if (typeof shader === 'function') return shader;
+  if (typeof shader === 'string' && shader) {
+    const hit = typeof getJsonShader === 'function' ? getJsonShader(shader) : null;
+    if (hit) return hit;
+  }
+  if (accentKeys) {
+    const hit = typeof getJsonShader === 'function' ? getJsonShader('timing') : null;
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** 代码块展示 */

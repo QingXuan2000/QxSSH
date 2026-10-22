@@ -171,14 +171,19 @@
 .st-app-count { font-size: 0.74rem; color: var(--muted-foreground); flex: none; }
 .st-app-icon {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 1.5rem; height: 1.5rem; color: var(--muted-foreground);
+  width: 20px; height: 20px; color: var(--foreground);
 }
-.st-app-icon .qicon-img { width: 100%; height: 100%; object-fit: contain; }
+.st-app-icon .qicon { width: 20px; height: 20px; }
+.st-app-icon .qicon-swap { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
+.st-app-icon .qicon-img { width: 20px; height: 20px; object-fit: contain; }
 .st-app-chevron { flex: none; display: inline-flex; color: var(--muted-foreground); opacity: 0.7; }
 
 .st-detail-head { display: flex; align-items: center; gap: 10px; }
 .st-detail-back .st-back-ic { transform: rotate(180deg); }
-.st-detail-icon { width: 1.75rem; height: 1.75rem; color: var(--foreground); }
+.st-detail-icon { width: 24px; height: 24px; color: var(--foreground); }
+.st-detail-icon .qicon { width: 24px; height: 24px; }
+.st-detail-icon .qicon-swap { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+.st-detail-icon .qicon-img { width: 24px; height: 24px; object-fit: contain; }
 .st-detail-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 
 .st-perm-note {

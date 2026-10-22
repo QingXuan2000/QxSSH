@@ -1,0 +1,20 @@
+{
+  "id": "systemd",
+  "name": "Systemd 服务管理",
+  "nameKey": "app.systemd.name",
+  "languages": ["zh-CN", "en-US"],
+  "version": "1.0.0",
+  "description": "Linux 系统服务、套接字与定时器管理器，提供服务全生命周期控制、开机自启、配置分析与 Journal 实时日志",
+  "descriptionKey": "app.systemd.desc",
+  "author": "QxSSH",
+  "icon": { "light": "icon-light.svg", "dark": "icon-dark.svg" },
+  "category": "系统",
+  "categoryKey": "core.category-system",
+  "keywords": ["systemd", "systemctl", "service", "daemon", "journalctl", "timer", "socket", "unit"],
+  "entry": "index.html",
+  "singleton": true,
+  "preferredSize": { "width": 1180, "height": 720, "minWidth": 900, "minHeight": 500 },
+  "permissions": ["hosts:read", "exec:run", "sudo:request", "sudo:forget"],
+  "systemApp": true,
+  "disableable": true
+}

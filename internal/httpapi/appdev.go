@@ -41,7 +41,7 @@ func validateDirManifest(dir string) (appManifest, error) {
 		return appManifest{}, fmt.Errorf("manifest.json 解析失败: %w", err)
 	}
 	if m.SystemApp {
-		return appManifest{}, errors.New("该应用声明为系统内置应用，不允许以开发模式加载")
+		return appManifest{}, errors.New("该应用声明为系统内置应用，不允许从外部加载或安装")
 	}
 	if m.Disableable {
 		return appManifest{}, errors.New("manifest.disableable 仅系统内置应用可用，用户应用不应声明")

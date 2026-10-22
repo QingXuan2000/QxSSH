@@ -320,7 +320,8 @@ body[data-tbpos="right"] .startmenu { top: 14px; right: 76px; transform-origin: 
 
 .sm-item:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
 
-.sm-item-ic { display: inline-flex; color: var(--primary); flex: none; }
+/* 开始菜单的图标保留自身描边色（继承 .sm-item 的前景色），不随主色染色 */
+.sm-item-ic { display: inline-flex; color: inherit; flex: none; }
 
 .sm-item.grid .sm-item-ic .qicon { width: 26px; height: 26px; }
 
@@ -828,6 +829,11 @@ body[data-tbpos="right"] .startmenu { top: 14px; right: 76px; transform-origin: 
 
 .qx-win-icon .qicon { width: 100%; height: 100%; }
 
+/* 亮暗双图标的 .qicon-swap 是 inline-flex，没有确定宽度时里面 img 的 100% 无从计算，
+   会塌成 0×0（systemd 等用 svg 图片做图标的窗口左上角就是这样消失的）。 */
+.qx-win-icon .qicon-swap,
+.qx-win-icon .qicon-swap > .qicon { width: 100%; height: 100%; }
+
 .qx-win-actions {
   display: flex; align-items: center; gap: 3px;
   flex: none;
@@ -925,15 +931,49 @@ body.qx-dragging .qx-app-frame { pointer-events: none; }
 }
 
 @media (max-width: 767px) {
+  /* 窗口坐标与尺寸由 wm 写成内联样式，这里必须用 !important 才能在小屏铺满，
+     否则窗口保留桌面坐标导致右侧（含关闭按钮）溢出视口。 */
   .qx-window {
-    position: fixed; inset: 0; width: 100vw !important; height: 100vh !important;
+    position: fixed; inset: 0;
+    left: 0 !important; top: 0 !important;
+    width: 100vw !important; height: 100vh !important;
     border-radius: 0; border: 0;
   }
   .qx-window.qx-win-minimized {
     visibility: hidden;
   }
-  .qx-win-resize, .qx-win-titlebar .qx-win-max, .qx-win-titlebar .qx-win-min {
+  /* 小屏保留最小化 / 最大化 / 关闭三个标题栏按钮，只收起不可用的拖拽热区：
+     窄窗口下用户仍需要一个可见的收起入口，隐藏按钮等于把窗口锁死在屏幕上。 */
+  .qx-win-resize {
     display: none;
+  }
+  .qx-win-titlebar {
+    height: 36px;
+    padding: 0 4px 0 10px;
+  }
+  .qx-win-btn {
+    width: 26px; height: 26px;
+  }
+  .qx-win-btn .qicon {
+    width: 15px; height: 15px;
+  }
+}
+
+@media (max-width: 420px) {
+  .qx-win-titlebar {
+    padding: 0 2px 0 8px;
+  }
+  .qx-win-actions {
+    gap: 0;
+  }
+  .qx-win-title {
+    font-size: 0.82rem;
+  }
+  .qx-win-btn {
+    width: 24px; height: 24px;
+  }
+  .qx-win-btn .qicon {
+    width: 14px; height: 14px;
   }
 }
 

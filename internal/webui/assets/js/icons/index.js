@@ -119,12 +119,40 @@ export function hasIcon(name) {
   return Boolean(CUSTOM_PATHS[String(name || '')]) || Boolean(lucideKey(name));
 }
 
-/** 取应用图标：传图片文件名时按应用目录取图，否则按图标名渲染 */
-export function appIcon(name, cls = 'qicon', appId = '') {
+/**
+ * 把清单里的图标取值拆成亮色 / 暗色两份。
+ * 字符串写法（旧清单）视为两种主题共用；对象写法 `{light, dark}` 分别取用，
+ * 缺一侧时另一侧兜底，两侧相同时收敛为单一取值。
+ */
+export function iconPair(spec) {
+  if (spec && typeof spec === 'object') {
+    const light = String(spec.light || spec.dark || '').trim();
+    const dark = String(spec.dark || spec.light || '').trim();
+    return { light, dark: dark === light ? '' : dark };
+  }
+  const s = String(spec || '').trim();
+  return { light: s, dark: '' };
+}
+
+function plainAppIcon(name, cls, appId) {
   const n = String(name || '');
   if (/\.[a-z0-9]+$/i.test(n) && appId) {
     return `<img class="${cls} qicon-img" src="${appFileUrl(appId, n)}" alt="" aria-hidden="true">`;
   }
   const key = n && (CUSTOM_PATHS[n] || lucideKey(n)) ? n : 'hosts';
   return icon(key, cls);
+}
+
+/**
+ * 取应用图标：传图片文件名时按应用目录取图，否则按图标名渲染。
+ * 第二参数之外还接受清单的复合写法 `{ light, dark }`——亮暗不同时挂两枚，
+ * 由根节点 .dark 切换显示，主题切换无需重渲染应用列表。
+ */
+export function appIcon(spec, cls = 'qicon', appId = '') {
+  const pair = iconPair(spec);
+  if (!pair.dark) return plainAppIcon(pair.light, cls, appId);
+  return `<span class="qicon-swap">`
+    + `${plainAppIcon(pair.light, `${cls} qicon-light`, appId)}`
+    + `${plainAppIcon(pair.dark, `${cls} qicon-dark`, appId)}`
+    + '</span>';
 }

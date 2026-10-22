@@ -11,6 +11,11 @@
   background: var(--card);
 }
 
+/* 自定义着色器 examples-threshold 的三个色档，走主题变量而非硬编码 */
+.gal-json-hot { color: var(--destructive); font-weight: 600; }
+.gal-json-warm { color: var(--warning, var(--chart-2)); font-weight: 600; }
+.gal-json-cool { color: var(--success); }
+
 .gal-row {
   display: flex;
   flex-wrap: wrap;

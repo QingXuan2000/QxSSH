@@ -55,7 +55,8 @@
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 0.55);
   background: var(--row-active);
-  color: var(--primary);
+  /* 不覆盖 color：内置图标沿用 --foreground，图片图标（<img>）保持文件自身颜色，
+     商店预览因此与桌面/任务栏一致，不把图标染成主题主色 */
 }
 .am-ic .qicon { width: 20px; height: 20px; }
 .am-ic-lg { width: 46px; height: 46px; }
@@ -116,7 +117,30 @@
 .am-install-head .help { font-size: 0.72rem; }
 .am-install-row { display: flex; align-items: center; gap: 8px; }
 .am-url { flex: 1; min-width: 0; }
-.am-msg { color: var(--destructive); font-size: 0.74rem; min-height: 1em; }
+.am-msg {
+  color: var(--destructive);
+  font-size: 0.74rem;
+  min-height: 1.2em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-msg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+.am-msg-row > .cmp-badge { flex-shrink: 0; }
+.am-msg-row > .am-msg-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .am-detail, .am-confirm { max-width: 440px; }
 .am-detail-head {

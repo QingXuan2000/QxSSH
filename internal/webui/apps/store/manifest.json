@@ -10,7 +10,7 @@
   "icon": "package",
   "category": "系统",
   "categoryKey": "core.category-system",
-  "keywords": ["store", "app", "manager", "install", "uninstall", "enable", "disable", "应用", "管理", "安装", "卸载", "启用", "禁用"],
+  "keywords": ["store", "app", "manager", "install", "uninstall", "enable", "disable", "git", "应用", "管理", "安装", "卸载", "启用", "禁用"],
   "entry": "index.html",
   "singleton": true,
   "preferredSize": { "width": 880, "height": 580, "minWidth": 560, "minHeight": 380 },

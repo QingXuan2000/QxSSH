@@ -717,7 +717,7 @@ function boot(el, ctx) {
           permQ.next = '';
         },
       }, [
-        h('span', { class: 'st-app-icon', html: appIcon(a.icon, 'qicon qicon-sm', a.id) }),
+        h('span', { class: 'st-app-icon', html: appIcon(a.icon || a.id, 'qicon', a.id) }),
         h('span', { class: 'st-app-name', text: appName(a) || a.id }),
         a.systemApp === true
           ? badge(t('app.settings.perm-group-system'), 'success')
@@ -779,7 +779,7 @@ function boot(el, ctx) {
 
     const headBar = h('div', { class: 'st-detail-head' }, [
       backBtn,
-      h('span', { class: 'st-app-icon st-detail-icon', html: appIcon(sel.icon, 'qicon', sel.id) }),
+      h('span', { class: 'st-app-icon st-detail-icon', html: appIcon(sel.icon || sel.id, 'qicon', sel.id) }),
       h('div', { class: 'st-detail-title' }, [
         h('span', { class: 'st-app-name', text: appName(sel) || sel.id }),
         selSystem

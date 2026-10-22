@@ -59,6 +59,9 @@ import * as DATAVIEW from '/assets/js/core/data-view.js';
 import { DataView, createDataView } from '/assets/js/core/data-view.js';
 import * as SPLITTER from '/assets/js/core/splitter.js';
 import { createSplitter } from '/assets/js/core/splitter.js';
+import {
+  defineJsonShader, timingShader, languageShader, composeShaders, fieldShader, listJsonShaders,
+} from '/assets/js/core/json-shader.js';
 
 const TAB_DEFS = [
   { id: 'icons', key: 'app.examples.tab-icons', icon: 'star' },
@@ -168,6 +171,42 @@ const PERM_TEXT = (ok) => `requestAppPermission(['hosts:read']) -> ${ok}`;
 const PERM2 = ['server:read', 'logs:read'];
 const PERM2_TEXT = (ok) => `requestAppPermission(['server:read','logs:read']) -> ${ok}`;
 const JSON_SAMPLE = { name: 'node-01', tags: ['web', 'db'], port: 22 };
+// critical-chain 形状：键里带「单元名 @激活时刻 +自身耗时」，交给 keySplit 拆成键名 + 尾段
+// 时刻可能是多段（@1min 44.881s），duration 可能省略（target 类单元），两种形状都要能上色
+const JSON_CHAIN_SAMPLE = {
+  'graphical.target @1min 44.881s': {
+    'multi-user.target @20.664s': {
+      'docker.service @4.512s +588ms': true,
+      'getty@tty1.service @3.120s +210ms': true,
+      'systemd-journald.service @2.884s +1.402s': true,
+    },
+  },
+};
+// 日志行交给 languageShader('log')：级别、时间戳、IP、数字各自取色
+const JSON_LOG_SAMPLE = {
+  level: 'ERROR',
+  time: '2026-10-20T12:00:00Z',
+  msg: 'ssh: connect to host 10.0.0.9 port 22: Connection refused',
+  retry: 3,
+  fallback: 'WARN retry scheduled at 10.0.0.10',
+};
+// 演示自定义着色器：数值型键命中阈值时换成告警色
+defineJsonShader('examples-threshold', (text, ctx) => {
+  if (ctx.slot !== 'value') return null;
+  const m = /^"?(\d+(?:\.\d+)?)%"?$/.exec(String(text));
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (n >= 80) return [{ text: String(text), class: 'gal-json-hot' }];
+  if (n >= 50) return [{ text: String(text), class: 'gal-json-warm' }];
+  return [{ text: String(text), class: 'gal-json-cool' }];
+});
+const JSON_UTIL_SAMPLE = { cpu: '92%', mem: '61%', disk: '38%', load: '4.10' };
+// composeShaders + fieldShader 的样例：unit 字段走时刻着色器，其余字段回落到 log 语法
+const JSON_EVENT_SAMPLE = {
+  unit: 'docker.service @4.512s +588ms',
+  peer: 'WARN containerd.service @4.101s +1.204s',
+  note: 'INFO both units reached running state',
+};
 const EXEC_SAMPLE = { ok: true, name: 'uname -a', out: 'Linux node-01 6.1.0', dur: '0.02s' };
 const WINDOW_CLASS = 'gal-demo-class';
 
@@ -219,6 +258,30 @@ function apiCoverageReport() {
     if (!exported.has(name)) unknown.push(name);
   }
   return { missing, unknown, total: listed.size };
+}
+
+// SDK_GROUPS 的 item.name 写法是 'qx.xxx()' / 'qx.APP_API_ERR' / 'qx.sys'，
+// 这里归一化成 qx 的顶层键名（去掉 qx. 前缀与末尾括号），再与 Object.keys(qx) 对差集。
+function sdkKeyOf(name) {
+  return String(name || '')
+    .replace(/^qx\./, '')
+    .replace(/\(\s*\)$/, '')
+    .trim();
+}
+
+function sdkCoverageReport() {
+  const exported = Object.keys(qx || {});
+  const listed = new Set();
+  for (const g of SDK_GROUPS) {
+    for (const it of g.items) {
+      const k = sdkKeyOf(it.name);
+      // 'qx.kit.sh()' 这类既细到方法名的条目归一化后带点，不参与顶层键比对
+      if (k && !k.includes('.')) listed.add(k);
+    }
+  }
+  const missing = exported.filter((k) => !listed.has(k));
+  const unknown = [...listed].filter((k) => !exported.includes(k));
+  return { missing, unknown, total: listed.size, exported: exported.length };
 }
 
 let iconFilter = null;
@@ -600,6 +663,173 @@ const SDK_GROUPS = [
     ],
   },
   {
+    id: 'bridge',
+    permScope: '免权限',
+    labelKey: 'app.examples.sdk-group-bridge',
+    badge: 'qx.getContext / qx.bootApp',
+    items: [
+      { name: 'qx.getContext()', perm: 'public', desc: '读取宿主当前广播的应用上下文对象', descEn: 'Read the app context object announced by host', usage: 'await qx.getContext()', run: () => qx.getContext() },
+      { name: 'qx.onInit()', perm: 'public', desc: '注册初始化回调；宿主已就绪则立即执行，否则入队等待', descEn: 'Register an init callback; runs now if host is ready', usage: 'qx.onInit((ctx) => { ... })', run: () => { const off = qx.onInit(() => { }); return { registered: true, note: 'onInit 回调已注册' }; } },
+      { name: 'qx.getHostInfo()', perm: 'public', desc: '获取宿主版本、平台与窗口能力信息', descEn: 'Get host version, platform and window capabilities', usage: 'await qx.getHostInfo()', run: () => qx.getHostInfo() },
+      { name: 'qx.getWorkspaceInfo()', perm: 'public', desc: '获取当前工作区标识与名称', descEn: 'Get current workspace id and name', usage: 'await qx.getWorkspaceInfo()', run: () => qx.getWorkspaceInfo() },
+      { name: 'qx.appBoot()', perm: 'public', desc: '等待宿主就绪并取出根元素、URL 参数与 hostId', descEn: 'Await readiness and resolve root element, params and hostId', usage: 'const boot = await qx.appBoot({ root: "#app" })', run: async () => { const b = await qx.appBoot({ root: '#app' }); return { hostId: b.hostId, params: b.params, hasRoot: !!b.root }; } },
+      { name: 'qx.bootApp()', perm: 'public', desc: '等待就绪后运行应用入口，返回带 dispose 的句柄（会重启渲染，示例只展示签名）', descEn: 'Run app entry after readiness and return a dispose handle', usage: 'await qx.bootApp(({ root, ctx }) => { ... })', run: () => ({ signature: 'bootApp(boot, { root = "#app" })', note: '示例应用已在 bootApp 内运行，此处仅展示签名' }) },
+      { name: 'qx.bootAppNoInit()', perm: 'public', desc: '不等待宿主就绪直接运行入口，用于独立页面', descEn: 'Run app entry without waiting for host readiness', usage: 'qx.bootAppNoInit(({ root }) => { ... })', run: () => ({ signature: 'bootAppNoInit(boot, { root = "#app" })', note: '独立页面场景使用，示例应用不重复运行' }) },
+      { name: 'qx.reloadApp()', perm: 'public', desc: '请求宿主重新加载指定应用（传自身 id 会重载本窗口）', descEn: 'Ask host to reload an app by id', usage: 'qx.reloadApp("examples")', run: () => ({ signature: 'reloadApp(appId)', note: '传自身 id 会重载当前窗口，示例不触发' }) },
+      { name: 'qx.closeSelf()', perm: 'public', desc: '请求宿主关闭当前应用窗口', descEn: 'Ask host to close the current window', usage: 'qx.closeSelf()', run: () => ({ signature: 'closeSelf()', note: '会关闭当前窗口，示例不触发' }) },
+    ],
+  },
+  {
+    id: 'window',
+    permScope: '免权限 / 窗口控制',
+    labelKey: 'app.examples.sdk-group-window',
+    badge: 'qx.setTitle / qx.windowControl',
+    items: [
+      { name: 'qx.setTitle()', perm: 'public', desc: '设置当前窗口标题', descEn: 'Set the current window title', usage: 'qx.setTitle("QxSSH Examples")', run: () => { qx.setTitle('QxSSH Examples'); return 'setTitle -> ok'; } },
+      { name: 'qx.setTitleAccent()', perm: 'public', desc: '设置标题栏强调色（CSS 颜色值）', descEn: 'Set title bar accent color', usage: 'qx.setTitleAccent("#6ea8fe")', run: () => { qx.setTitleAccent('#6ea8fe'); return 'setTitleAccent -> #6ea8fe'; } },
+      { name: 'qx.setWindowBadge()', perm: 'public', desc: '在窗口标题上挂角标文本（空串清除）', descEn: 'Attach a badge text to the window title', usage: 'qx.setWindowBadge("demo")', run: () => { qx.setWindowBadge('demo'); return 'setWindowBadge -> demo'; } },
+      { name: 'qx.windowClass()', perm: 'public', desc: '为窗口根节点增删 CSS 类', descEn: 'Add or remove CSS classes on the window root', usage: 'qx.windowClass(["gal-demo-class"], [])', run: () => { qx.windowClass([WINDOW_CLASS], []); return `windowClass -> ${WINDOW_CLASS}`; } },
+      { name: 'qx.windowControl()', perm: 'public', desc: '控制窗口状态：minimize / maximize / restore / toggle-max / close', descEn: 'Control window state: minimize/maximize/restore/toggle-max/close', usage: 'qx.windowControl("minimize")', run: () => { qx.windowControl('restore'); return { action: 'restore', note: '可用动作：minimize / maximize / restore / toggle-max / close' }; } },
+      { name: 'qx.setWindowRect()', perm: 'public', desc: '设置窗口屏幕坐标与尺寸', descEn: 'Set window screen rect (x, y, width, height)', usage: 'qx.setWindowRect({ x: 120, y: 80, width: 1120, height: 760 })', run: () => ({ signature: 'setWindowRect({ x, y, width, height })', current: undefined }) },
+      { name: 'qx.focusWindow()', perm: 'public', desc: '请求宿主激活并置顶当前窗口', descEn: 'Ask host to focus and raise the current window', usage: 'qx.focusWindow()', run: () => { qx.focusWindow(); return 'focusWindow -> ok'; } },
+      { name: 'qx.openExternal()', perm: 'public', desc: '用系统默认浏览器打开外部链接（不在应用 iframe 内导航）', descEn: 'Open an external URL in the system browser', usage: 'qx.openExternal("https://example.com")', run: () => ({ signature: 'openExternal(url)', note: '会拉起系统浏览器，示例不触发' }) },
+      { name: 'qx.reportAppError()', perm: 'public', desc: '把应用内异常上报给宿主，进入宿主的错误面板', descEn: 'Report an app error to the host error panel', usage: 'qx.reportAppError(new Error("boom"))', run: () => { qx.reportAppError(new Error('examples: 这是一条由 reportAppError 上报的示例错误')); return 'reportAppError -> sent'; } },
+      { name: 'qx.applyStoredTheme()', perm: 'public', desc: '重新应用本地持久化的主题偏好', descEn: 'Re-apply the persisted theme preference', usage: 'qx.applyStoredTheme()', run: () => { qx.applyStoredTheme(); return 'applyStoredTheme -> ok'; } },
+      { name: 'qx.applyStoredGlass()', perm: 'public', desc: '重新应用本地持久化的毛玻璃参数', descEn: 'Re-apply the persisted glass blur setting', usage: 'qx.applyStoredGlass()', run: () => { qx.applyStoredGlass(); return 'applyStoredGlass -> ok'; } },
+    ],
+  },
+  {
+    id: 'appapi',
+    permScope: 'apps:list / 应用间调用',
+    labelKey: 'app.examples.sdk-group-appapi',
+    badge: 'qx.provideApi / qx.callAppApi',
+    items: [
+      { name: 'qx.provideApi()', perm: 'public', desc: '对外提供本应用的 API，可带描述、版本与权限要求', descEn: 'Expose an API for other apps to call', usage: 'qx.provideApi("examples.ping", (args) => ({ ok: true, args }), { description: "ping" })', run: () => { qx.provideApi('examples.ping', (args) => ({ ok: true, echo: args }), { description: '示例 ping', version: '1.0.0' }); return { provided: 'examples.ping', hint: '现在可被其他应用 callAppApi("examples", "examples.ping", ...) 调用' }; } },
+      { name: 'qx.revokeApi()', perm: 'public', desc: '撤销已提供的 API 并中止进行中的调用', descEn: 'Revoke a previously provided API', usage: 'qx.revokeApi("examples.ping")', run: () => { qx.revokeApi('examples.ping'); return 'revokeApi("examples.ping") -> ok'; } },
+      { name: 'qx.callAppApi()', perm: 'apps:list', desc: '调用其他应用提供的 API，支持超时、取消与进度回调', descEn: 'Call an API provided by another app', usage: 'await qx.callAppApi("hosts", "hosts.list", {}, { timeout: 5000 })', run: async () => { try { return await qx.callAppApi('examples', 'examples.ping', { at: Date.now() }, { timeout: 3000 }); } catch (e) { return { ok: false, code: e.code, error: e.message, hint: '先点上一行 provideApi 注册，或目标应用未打开' }; } } },
+      { name: 'qx.callAppApis()', perm: 'apps:list', desc: '批量调用多个应用 API，统一返回结果数组', descEn: 'Call multiple app APIs in one batch', usage: 'await qx.callAppApis([{ appId: "hosts", api: "hosts.list" }])', run: async () => { try { return await qx.callAppApis([{ appId: 'examples', api: 'examples.ping', args: { n: 1 } }], { timeout: 3000 }); } catch (e) { return { ok: false, code: e.code, error: e.message }; } } },
+      { name: 'qx.listAppApis()', perm: 'apps:list', desc: '列出指定应用已提供的全部 API 及其元信息', descEn: 'List all APIs provided by an app with metadata', usage: 'await qx.listAppApis("examples")', run: () => qx.listAppApis('examples') },
+      { name: 'qx.onAppApiChange()', perm: 'public', desc: '订阅应用 API 注册表变化，返回取消订阅函数', descEn: 'Subscribe to app API registry changes', usage: 'const off = qx.onAppApiChange((info) => { ... }, "examples")', run: () => { const off = qx.onAppApiChange(() => { }, 'examples'); if (typeof off === 'function') off(); return 'onAppApiChange -> subscribed & unsubscribed'; } },
+      { name: 'qx.APP_API_ERR', perm: 'public', desc: '应用间调用错误码枚举：bad_args / not_open / not_provided / needs_window / target_closed / timeout / cancelled / permission / handler', descEn: 'Error code enum for app-to-app calls', usage: 'catch (e) { if (e.code === qx.APP_API_ERR.TIMEOUT) { ... } }', run: () => qx.APP_API_ERR },
+      { name: 'qx.publishEvent()', perm: 'public', desc: '向宿主与其他应用广播事件，并在本应用内分发', descEn: 'Broadcast an event to host and other apps', usage: 'qx.publishEvent("examples.demo", { hello: 1 })', run: () => { qx.publishEvent('examples.demo', { hello: 1, at: Date.now() }); return 'publishEvent("examples.demo") -> ok'; } },
+      { name: 'qx.onEvent()', perm: 'public', desc: '订阅事件主题（支持 * 通配），返回取消订阅函数', descEn: 'Subscribe to event topics with wildcard support', usage: 'const off = qx.onEvent("examples.*", (payload, meta) => { ... })', run: () => { const seen = []; const off = qx.onEvent('examples.*', (p) => seen.push(p)); qx.publishEvent('examples.demo2', { n: 2 }); off(); return { received: seen.length, sample: seen[0] || null }; } },
+      { name: 'qx.onWindowState()', perm: 'public', desc: '订阅窗口状态变化（最小化/最大化/焦点），返回取消订阅函数', descEn: 'Subscribe to window state changes', usage: 'const off = qx.onWindowState((st) => { ... })', run: () => { let st = null; const off = qx.onWindowState((s) => { st = s; }); off(); return { current: st }; } },
+    ],
+  },
+  {
+    id: 'session',
+    permScope: '免权限 / 会话与权限变更',
+    labelKey: 'app.examples.sdk-group-session',
+    badge: 'qx.onPermChange / qx.hostDialog',
+    items: [
+      { name: 'qx.hostDialog()', perm: 'public', desc: '通用宿主对话框：kind 取 alert / confirm / prompt', descEn: 'Generic host dialog: alert / confirm / prompt', usage: 'await qx.hostDialog({ kind: "alert", title: "T", desc: "D" })', run: () => qx.hostDialog({ kind: 'alert', title: 'hostDialog', desc: t('app.examples.hostdialog-note') }) },
+      { name: 'qx.writeClipboard()', perm: 'public', desc: '将文本写入系统剪贴板（原生通道，非 navigator）', descEn: 'Write text to the OS clipboard through the host', usage: 'await qx.writeClipboard("text")', run: async () => ({ copied: await qx.writeClipboard('written by qx.writeClipboard()') }) },
+      { name: 'qx.onSessionChange()', perm: 'public', desc: '订阅登录会话变化，返回取消订阅函数', descEn: 'Subscribe to session changes', usage: 'const off = qx.onSessionChange((s) => { ... })', run: () => { const off = qx.onSessionChange(() => { }); if (typeof off === 'function') off(); return 'onSessionChange -> subscribed'; } },
+      { name: 'qx.onPermChange()', perm: 'public', desc: '订阅本应用权限集变化（提权/回收后触发）', descEn: 'Subscribe to app permission set changes', usage: 'const off = qx.onPermChange((perms) => { ... })', run: () => { const off = qx.onPermChange(() => { }); if (typeof off === 'function') off(); return 'onPermChange -> subscribed'; } },
+      { name: 'qx.notifyPermChanged()', perm: 'public', desc: '通知宿主某应用的权限集已变化，触发其刷新', descEn: 'Tell host an app permission set changed', usage: 'qx.notifyPermChanged("examples")', run: () => { qx.notifyPermChanged('examples'); return 'notifyPermChanged("examples") -> ok'; } },
+      { name: 'qx.notifyAppsChanged()', perm: 'public', desc: '通知宿主应用注册表已变化（安装/卸载后）', descEn: 'Tell host the app registry changed', usage: 'qx.notifyAppsChanged()', run: () => { qx.notifyAppsChanged(); return 'notifyAppsChanged() -> ok'; } },
+      { name: 'qx.notifySessionRevoked()', perm: 'public', desc: '通知宿主会话已失效，触发重新登录流程', descEn: 'Tell host the session was revoked', usage: 'qx.notifySessionRevoked("examples")', run: () => ({ signature: 'notifySessionRevoked(appId)', note: '会触发宿主会话失效处理，示例不触发' }) },
+    ],
+  },
+  {
+    id: 'i18n',
+    permScope: '免权限 / 国际化',
+    labelKey: 'app.examples.sdk-group-i18n',
+    badge: 'qx.setupAppI18n / qx.t',
+    items: [
+      { name: 'qx.t()', perm: 'public', desc: '按 key 取当前语言的文案，缺 key 时回落为 key 本身', descEn: 'Translate a key in current language', usage: 'qx.t("app.examples.tab-sdk")', run: () => ({ key: 'app.examples.tab-sdk', value: qx.t('app.examples.tab-sdk') }) },
+      { name: 'qx.tf()', perm: 'public', desc: '带占位符的翻译：文案里写 {v1} {v2}，这里传参替换', descEn: 'Translate with {v1} placeholder interpolation', usage: 'qx.tf("app.examples.selfcheck-total", { v1: 12 })', run: () => qx.tf('app.examples.selfcheck-total', { v1: 12 }) },
+      { name: 'qx.lang()', perm: 'public', desc: '读取当前语言代码', descEn: 'Read the current language code', usage: 'qx.lang()', run: () => qx.lang() },
+      { name: 'qx.setLang()', perm: 'public', desc: '切换语言并持久化（examples 作用域下由 setupAppI18n 管理语言表）', descEn: 'Switch language and persist the choice', usage: 'await qx.setLang("en-US", { persist: true })', run: () => ({ signature: 'setLang(code, { persist = true })', current: qx.lang(), note: '示例应用的语言表由 setupAppI18n 加载，切换请在右上角语言菜单操作' }) },
+      { name: 'qx.negotiateLang()', perm: 'public', desc: '与宿主协商最优语言（本地偏好 > 宿主设置 > navigator）', descEn: 'Negotiate the best language with host and browser', usage: 'await qx.negotiateLang()', run: () => qx.negotiateLang() },
+      { name: 'qx.listLangs()', perm: 'public', desc: '列出可用语言及显示名', descEn: 'List available languages with display names', usage: 'await qx.listLangs()', run: () => qx.listLangs() },
+      { name: 'qx.onLangChange()', perm: 'public', desc: '订阅语言变化，返回取消订阅函数', descEn: 'Subscribe to language changes', usage: 'const off = qx.onLangChange((code) => { ... })', run: () => { const off = qx.onLangChange(() => { }); if (typeof off === 'function') off(); return 'onLangChange -> subscribed'; } },
+      { name: 'qx.LANGUAGES', perm: 'public', desc: '内置语言清单常量（宿主语言表与别名）', descEn: 'Built-in language list constant', usage: 'qx.LANGUAGES', run: () => qx.LANGUAGES },
+      { name: 'qx.DEFAULT_LANG', perm: 'public', desc: '默认语言代码常量', descEn: 'Default language code constant', usage: 'qx.DEFAULT_LANG', run: () => qx.DEFAULT_LANG },
+      { name: 'qx.setupI18n()', perm: 'public', desc: '底层 i18n 初始化：指定语言目录与作用域后加载语言表', descEn: 'Low-level i18n setup with base dir and scope', usage: 'await qx.setupI18n("/assets/language", { scope: "core" })', run: () => ({ signature: 'setupI18n(dir, { scope })', note: '应用一般改用 setupAppI18n，二者不叠加' }) },
+      { name: 'qx.setupAppI18n()', perm: 'public', desc: '应用级 i18n 初始化：自动协商语言、按 scope 持久化、注册语言切换控件', descEn: 'App-level i18n setup with negotiation and persistence', usage: 'await qx.setupAppI18n({ base: new URL("./language", import.meta.url).href, languages: ["zh-CN", "en-US"], scope: "examples" })', run: () => ({ signature: 'setupAppI18n({ base, languages, scope })', current: qx.lang(), note: '示例应用已在启动时调用' }) },
+      { name: 'qx.withI18n()', perm: 'public', desc: '包裹渲染函数，语言变化时自动重渲染', descEn: 'Wrap a render function so it rerenders on language change', usage: 'qx.withI18n(() => h("div", { text: qx.t("app.examples.tab-sdk") }))', run: () => { const wrapped = qx.withI18n(() => null); return { wrapped: typeof wrapped }; } },
+      { name: 'qx.openPopper()', perm: 'public', desc: '在锚点元素旁弹出浮层（语言菜单、下拉面板的底层实现）', descEn: 'Open a popper panel anchored to an element', usage: 'qx.openPopper(anchorEl, (close) => vnode)', run: () => ({ signature: 'openPopper(anchor, render)', note: '需要真实锚点元素，示例页由 i18nMenu 内部调用' }) },
+      { name: 'qx.i18nSelect()', perm: 'public', desc: '语言切换下拉框组件工厂', descEn: 'Language switcher select component', usage: 'qx.i18nSelect({ onChange })', run: () => ({ component: 'i18nSelect', returns: typeof qx.i18nSelect({}) }) },
+      { name: 'qx.i18nButton()', perm: 'public', desc: '语言切换按钮组件工厂', descEn: 'Language switcher button component', usage: 'qx.i18nButton({ onChange })', run: () => ({ component: 'i18nButton', returns: typeof qx.i18nButton({}) }) },
+      { name: 'qx.i18nMenu()', perm: 'public', desc: '语言切换菜单组件工厂', descEn: 'Language switcher menu component', usage: 'qx.i18nMenu({ onChange })', run: () => ({ component: 'i18nMenu', returns: typeof qx.i18nMenu({}) }) },
+    ],
+  },
+  {
+    id: 'code',
+    permScope: '免权限 / 代码高亮',
+    labelKey: 'app.examples.sdk-group-code',
+    badge: 'qx.CodeEditor / qx.tokenize',
+    items: [
+      { name: 'qx.highlightCode()', perm: 'public', desc: '把源码转成带 qx-tok-* 类的 HTML 片段', descEn: 'Convert source code into highlighted HTML', usage: 'qx.highlightCode("ssh root@10.0.0.1", "sh")', run: () => ({ html: qx.highlightCode('ssh root@10.0.0.1 -p 22', 'sh') }) },
+      { name: 'qx.highlightHTML()', perm: 'public', desc: '与 highlightCode 相同，但保留换行与行号友好结构', descEn: 'Highlighted HTML with line-preserving markup', usage: 'qx.highlightHTML(code, "json")', run: () => ({ html: qx.highlightHTML('{"a":1}', 'json') }) },
+      { name: 'qx.tokenize()', perm: 'public', desc: '把源码切分为 { type, text } 记号列表（着色器底层依赖）', descEn: 'Split source into typed tokens', usage: 'qx.tokenize("ERROR 10.0.0.9", "log")', run: () => qx.tokenize('ERROR 10.0.0.9 refused', 'log') },
+      { name: 'qx.languages()', perm: 'public', desc: '列出内置语言键与其别名', descEn: 'List built-in languages and aliases', usage: 'qx.languages()', run: () => qx.languages() },
+      { name: 'qx.languageForFile()', perm: 'public', desc: '按文件名或路径推断应使用的语言键', descEn: 'Infer language from file name or path', usage: 'qx.languageForFile("nginx.conf")', run: () => ({ 'main.go': qx.languageForFile('main.go'), 'nginx.conf': qx.languageForFile('nginx.conf'), 'a.json': qx.languageForFile('a.json') }) },
+      { name: 'qx.isTextFile()', perm: 'public', desc: '判断文件是否适合按文本预览', descEn: 'Check whether a file is text-previewable', usage: 'qx.isTextFile("a.log")', run: () => ({ 'a.log': qx.isTextFile('a.log'), 'a.png': qx.isTextFile('a.png') }) },
+      { name: 'qx.canonicalLanguage()', perm: 'public', desc: '把语言名或别名归一化为内置语言键', descEn: 'Normalize a language name or alias', usage: 'qx.canonicalLanguage("javascript")', run: () => ({ javascript: qx.canonicalLanguage('javascript'), yml: qx.canonicalLanguage('yml') }) },
+      { name: 'qx.registerLanguage()', perm: 'public', desc: '注册自定义语言语法与别名，供高亮与着色器使用', descEn: 'Register a custom language grammar and aliases', usage: 'qx.registerLanguage("mylang", [["keyword", "\\\\bfoo\\\\b"]], ["ml"])', run: () => { qx.registerLanguage('examples-demo', [['keyword', '\\bDEMO\\b']], ['exdemo']); return { registered: 'examples-demo', alias: 'exdemo', tokens: qx.tokenize('DEMO plain', 'exdemo') }; } },
+      { name: 'qx.TOKEN_TYPES', perm: 'public', desc: '记号类型常量表（keyword / string / number / error / warning / info / muted / constant / text）', descEn: 'Token type constant list', usage: 'qx.TOKEN_TYPES', run: () => qx.TOKEN_TYPES },
+      { name: 'qx.CodeEditor()', perm: 'public', desc: '代码编辑器组件工厂：语法高亮 + 行号 + 可编辑', descEn: 'Code editor component with highlight and gutter', usage: 'h(qx.CodeEditor, { value, lang: "sh", rows: 6 })', run: () => ({ component: 'CodeEditor', returns: typeof qx.CodeEditor }) },
+      { name: 'qx.codeField()', perm: 'public', desc: '单行代码输入字段工厂（带语言高亮）', descEn: 'Single-line code input field', usage: 'qx.codeField("命令", { lang: "sh" })', run: () => ({ returns: typeof qx.codeField('命令', { lang: 'sh' }) }) },
+    ],
+  },
+  {
+    id: 'shader',
+    permScope: '免权限 / JSON 着色器',
+    labelKey: 'app.examples.sdk-group-shader',
+    badge: 'qx.timingShader / qx.defineJsonShader',
+    items: [
+      { name: 'qx.timingShader()', perm: 'public', desc: '时刻着色器：把 @激活时刻 与 +耗时 分别染色，只有标记后紧跟数字才命中，getty@tty1.service 不会被误染', descEn: 'Timing shader: colour @activation and +duration segments', usage: 'h(JsonViewer, { value, keySplit: /\\s+/, shader: qx.timingShader() })', run: () => ({ tokens: qx.timingShader()('docker.service @4.512s +588ms', { slot: 'suffix', key: 'docker.service', depth: 1, path: '$root/0' }) }) },
+      { name: 'qx.languageShader()', perm: 'public', desc: '按语言语法给值上色，复用 code-editor 语法表；keys:true 时键名也走同一套语法', descEn: 'Colour values with a language grammar; keys:true also colours keys', usage: "qx.languageShader('log')", run: () => ({ tokens: qx.languageShader('log')('ERROR 10.0.0.9 refused', { slot: 'value', key: 'msg', depth: 1, path: '$root/0' }) }) },
+      { name: 'qx.composeShaders()', perm: 'public', desc: '组合多个着色器：按顺序问，第一个返回非空结果的胜出', descEn: 'Compose shaders; the first non-empty result wins', usage: 'qx.composeShaders(qx.fieldShader({ msg: qx.timingShader() }), qx.languageShader("log"))', run: () => ({ tokens: qx.composeShaders(qx.timingShader(), qx.languageShader('log'))('ERROR @1.2s', { slot: 'key', key: 'k', depth: 1, path: '$root/0' }) }) },
+      { name: 'qx.fieldShader()', perm: 'public', desc: '按字段规则着色：键支持精确键名、* 通配、以 / 结尾的路径前缀；命中但返回空则继续下一条', descEn: 'Per-field shader rules keyed by name, * or path prefix', usage: 'qx.fieldShader({ ERROR: qx.languageShader("log"), "/root/time/": qx.timingShader() })', run: () => { const s = qx.fieldShader({ msg: qx.languageShader('log'), '*': qx.timingShader() }); return { byKey: s('ERROR refused', { slot: 'value', key: 'msg', depth: 2, path: '$root/0' }), byWildcard: s('@3.1s +20ms', { slot: 'key', key: 'x', depth: 2, path: '$root/1' }) }; } },
+      { name: 'qx.defineJsonShader()', perm: 'public', desc: '注册具名着色器，之后 JsonViewer 可用字符串引用（示例页的 examples-threshold 即由此注册）', descEn: 'Register a named shader usable by string reference', usage: 'qx.defineJsonShader("myname", (text, ctx) => Token[] | null)', run: () => { qx.defineJsonShader('examples-demo', (text, ctx) => (ctx.slot === 'value' ? [{ text: String(text), class: 'gal-json-cool' }] : null)); return { registered: 'examples-demo', names: qx.listJsonShaders() }; } },
+      { name: 'qx.getJsonShader()', perm: 'public', desc: '按名取回已注册的着色器函数，未注册返回 null', descEn: 'Look up a registered shader by name', usage: 'qx.getJsonShader("timing")', run: () => ({ timing: typeof qx.getJsonShader('timing'), missing: qx.getJsonShader('no-such') }) },
+      { name: 'qx.listJsonShaders()', perm: 'public', desc: '列出全部已注册着色器名（内置 timing / log / json / sh）', descEn: 'List all registered shader names', usage: 'qx.listJsonShaders()', run: () => qx.listJsonShaders() },
+    ],
+  },
+  {
+    id: 'view',
+    permScope: '免权限 / 大数据视图',
+    labelKey: 'app.examples.sdk-group-view',
+    badge: 'qx.VirtualList / qx.LineChart',
+    items: [
+      { name: 'qx.VirtualList()', perm: 'public', desc: '虚拟滚动长列表组件：只渲染可视区行，万级数据不卡', descEn: 'Virtual scrolling list rendering only visible rows', usage: 'h(qx.VirtualList, { items, rowHeight: 32, row: (it) => vnode })', run: () => ({ component: 'VirtualList', returns: typeof qx.VirtualList }) },
+      { name: 'qx.scrollToRow()', perm: 'public', desc: '把虚拟列表滚动到指定行（支持 start / center / end 对齐）', descEn: 'Scroll a virtual list to a row index', usage: 'qx.scrollToRow(listEl, 120, 32, "center")', run: () => ({ signature: 'scrollToRow(el, index, rowHeight, align = "nearest")', note: '需要 VirtualList 的 DOM 引用，示例页 virtuallist 卡片内有按钮直接调用' }) },
+      { name: 'qx.LineChart()', perm: 'public', desc: 'Canvas 折线图组件：支持多序列、时序模式与自定义配色', descEn: 'Canvas line chart with series and time mode', usage: 'h(qx.LineChart, { series: [{ name, data }], height: 160, time: true })', run: () => ({ component: 'LineChart', returns: typeof qx.LineChart }) },
+      { name: 'qx.timeSeries()', perm: 'public', desc: '时序数据环形缓冲：push 采样值、按容量自动淘汰最旧点', descEn: 'Ring buffer for time-series samples', usage: 'const ts = qx.timeSeries(60); ts.push(1.2)', run: () => { const ts = qx.timeSeries(60, 2); ts.push(1.2, 3.4); return { keys: Object.keys(ts), snapshot: ts.data || ts.values || null }; } },
+      { name: 'qx.loadChartLib()', perm: 'public', desc: '按需加载图表底层库（首次调用时才拉取）', descEn: 'Lazily load the chart backend library', usage: 'await qx.loadChartLib()', run: async () => { const lib = await qx.loadChartLib(); return { loaded: !!lib }; } },
+    ],
+  },
+  {
+    id: 'namespaces',
+    permScope: '免权限 / 命名空间别名',
+    labelKey: 'app.examples.sdk-group-namespaces',
+    badge: 'qx.sys / qx.proc / qx.batchExec',
+    items: [
+      { name: 'qx.kit', perm: 'public', desc: '底层运维工具箱全量命名空间：sh / run / runJSON / runLines / runTable / parseTable / stream / which / fetchVia / tcpConnect / ensureSudo / runMany / startJob / jobHandle / followJob / jobs / collectMetrics / collectHostInfo 及全部系统读取方法', descEn: 'Raw ops toolbox namespace with every underlying helper', usage: 'qx.kit.diskUsage(host, "/")', run: () => ({ count: Object.keys(qx.kit).length, keys: Object.keys(qx.kit) }) },
+      { name: 'qx.sys', perm: 'public', desc: '系统诊断命名空间：diskUsage / memoryUsage / cpuInfo / osRelease / uptime / metrics / hostInfo', descEn: 'System diagnostics namespace object', usage: 'qx.sys.diskUsage(host, "/")', run: () => ({ keys: Object.keys(qx.sys) }) },
+      { name: 'qx.proc', perm: 'public', desc: '进程命名空间：list / kill', descEn: 'Process namespace: list / kill', usage: 'qx.proc.list(host, { limit: 10 })', run: () => ({ keys: Object.keys(qx.proc) }) },
+      { name: 'qx.net', perm: 'public', desc: '网络命名空间：ports / ping / interfaces / routes / testPort / resolve / fetchVia / tcpConnect', descEn: 'Network namespace object', usage: 'qx.net.interfaces(host)', run: () => ({ keys: Object.keys(qx.net) }) },
+      { name: 'qx.fs', perm: 'public', desc: '远端文件命名空间：exists / readText / writeText / readJSON / writeJSON / ensureDir / checksum / extract / compress', descEn: 'Remote file namespace object', usage: 'qx.fs.readText(host, "/etc/hosts")', run: () => ({ keys: Object.keys(qx.fs) }) },
+      { name: 'qx.service', perm: 'public', desc: '服务命名空间：status / action / start / stop / restart', descEn: 'Service namespace object', usage: 'qx.service.status(host, "sshd")', run: () => ({ keys: Object.keys(qx.service) }) },
+      { name: 'qx.env', perm: 'public', desc: '环境命名空间：get / user', descEn: 'Environment namespace: get / user', usage: 'qx.env.user(host)', run: () => ({ keys: Object.keys(qx.env) }) },
+      { name: 'qx.journal', perm: 'public', desc: '日志命名空间：tail / dmesg', descEn: 'Journal namespace: tail / dmesg', usage: 'qx.journal.tail(host, { lines: 20 })', run: () => ({ keys: Object.keys(qx.journal) }) },
+      { name: 'qx.pkg', perm: 'public', desc: '包管理命名空间：detect / installed', descEn: 'Package namespace: detect / installed', usage: 'qx.pkg.detect(host)', run: () => ({ keys: Object.keys(qx.pkg) }) },
+      { name: 'qx.git', perm: 'public', desc: 'Git 命名空间：status / log', descEn: 'Git namespace: status / log', usage: 'qx.git.status(host, "/var/www/repo")', run: () => ({ keys: Object.keys(qx.git) }) },
+      { name: 'qx.crontab', perm: 'public', desc: '定时任务命名空间：list', descEn: 'Crontab namespace: list', usage: 'qx.crontab.list(host)', run: () => ({ keys: Object.keys(qx.crontab) }) },
+      { name: 'qx.batch', perm: 'exec:run', desc: '批量操作命名空间：exec / upload（等价的扁平别名见下）', descEn: 'Batch namespace: exec / upload', usage: 'qx.batch.exec(hostIds, "uptime")', run: () => ({ keys: Object.keys(qx.batch) }) },
+      { name: 'qx.audit', perm: 'logs:read', desc: '审计命名空间：stats / export / logs / note', descEn: 'Audit namespace: stats / export / logs / note', usage: 'qx.audit.stats({ days: 7 })', run: () => ({ keys: Object.keys(qx.audit) }) },
+      { name: 'qx.batchExec()', perm: 'exec:run', desc: '顶层扁平别名：多主机并发执行同一条命令', descEn: 'Flat alias: run one command across many hosts', usage: 'await qx.batchExec(hostIds, "uptime")', run: () => ({ sameAs: 'qx.batch.exec', signature: 'batchExec(hostIds, cmd, opts)' }) },
+      { name: 'qx.batchUpload()', perm: 'sftp:write', desc: '顶层扁平别名：多主机并发上传同一文件', descEn: 'Flat alias: upload one file to many hosts', usage: 'await qx.batchUpload(hostIds, local, remote)', run: () => ({ sameAs: 'qx.batch.upload', signature: 'batchUpload(hostIds, localPath, remotePath, opts)' }) },
+      { name: 'qx.auditStats()', perm: 'logs:read', desc: '顶层扁平别名：审计日志统计聚合', descEn: 'Flat alias: audit log statistics', usage: 'await qx.auditStats({ days: 7 })', run: () => ({ sameAs: 'qx.audit.stats', signature: 'auditStats(query)' }) },
+      { name: 'qx.exportAuditLogs()', perm: 'logs:read', desc: '顶层扁平别名：导出审计日志为 CSV / JSON', descEn: 'Flat alias: export audit logs', usage: 'await qx.exportAuditLogs({ format: "csv" })', run: () => ({ sameAs: 'qx.audit.export', signature: 'exportAuditLogs(query)' }) },
+      { name: 'qx.auditLogs()', perm: 'logs:read', desc: '顶层扁平别名：分页查询审计日志', descEn: 'Flat alias: page through audit logs', usage: 'await qx.auditLogs({ page: 1, size: 20 })', run: () => ({ sameAs: 'qx.audit.logs', signature: 'auditLogs(query)' }) },
+      { name: 'qx.auditNote()', perm: 'logs:read', desc: '顶层扁平别名：为某条审计记录追加备注', descEn: 'Flat alias: append a note to an audit record', usage: 'await qx.auditNote(id, "note")', run: () => ({ sameAs: 'qx.audit.note', signature: 'auditNote(id, text)' }) },
+    ],
+  },
+  {
     id: 'public',
     permScope: '免权限',
     labelKey: 'app.examples.sdk-group-public',
@@ -795,9 +1025,14 @@ function SdkPage(props) {
     card(t('app.examples.sdk-selfcheck'), [
       h('pre', {
         class: 'gal-out',
-        text: `${tf('app.examples.selfcheck-total', { v1: qxTotalKeys })}\n${tf('app.examples.selfcheck-total', { v1: `qx.kit: ${kitTotalKeys}` })}\n${t('app.examples.sdk-selfcheck-ok')}`,
+        text: [
+          tf('app.examples.selfcheck-total', { v1: qxTotalKeys }),
+          tf('app.examples.selfcheck-total', { v1: `qx.kit: ${kitTotalKeys}` }),
+          tf('app.examples.selfcheck-total', { v1: `${SDK_GROUPS.length} groups / ${ALL_SDK_ITEMS.length} items` }),
+          t('app.examples.sdk-selfcheck-ok'),
+        ].join('\n'),
       }),
-      note('自检验证 qx 命名空间下全部 140+ 个属性与方法均可正常导出与使用。'),
+      note(tf('app.examples.sdk-selfcheck-note', { v1: qxTotalKeys, v2: ALL_SDK_ITEMS.length })),
     ]),
 
     card(t('app.examples.label-result'), [outNode(out)]),
@@ -1212,6 +1447,64 @@ function DataPage(props = {}) {
     demoCard(t('app.examples.section-json'), [
       h(JsonViewer, { value: JSON_SAMPLE, maxDepth: 3, cls: 'gal-json-box' }),
       note(t('app.examples.jsonviewer-note')),
+    ]),
+    demoCard(t('app.examples.section-json-expand'), [
+      h('div', { class: 'gal-grid2' }, [
+        h(JsonViewer, {
+          value: JSON_CHAIN_SAMPLE,
+          expandAll: true,
+          rootLabel: 'expandAll: true',
+          cls: 'gal-json-box',
+        }),
+        h(JsonViewer, {
+          value: JSON_CHAIN_SAMPLE,
+          maxDepth: 1,
+          expandAll: false,
+          rootLabel: 'maxDepth: 1',
+          cls: 'gal-json-box',
+        }),
+      ]),
+      note(t('app.examples.jsonviewer-expand-note')),
+    ]),
+    demoCard(t('app.examples.section-json-keysplit'), [
+      h(JsonViewer, {
+        value: JSON_CHAIN_SAMPLE,
+        expandAll: true,
+        keySplit: /\s+/,
+        shader: timingShader(),
+        rootLabel: t('app.examples.json-keysplit-root'),
+        cls: 'gal-json-box',
+      }),
+      note(t('app.examples.jsonviewer-keysplit-note')),
+    ]),
+    demoCard(t('app.examples.section-json-shader'), [
+      h('div', { class: 'gal-grid2' }, [
+        h(JsonViewer, {
+          value: JSON_LOG_SAMPLE,
+          expandAll: true,
+          shader: languageShader('log'),
+          rootLabel: "languageShader('log')",
+          cls: 'gal-json-box',
+        }),
+        h(JsonViewer, {
+          value: JSON_UTIL_SAMPLE,
+          expandAll: true,
+          shader: 'examples-threshold',
+          rootLabel: "shader: 'examples-threshold'",
+          cls: 'gal-json-box',
+        }),
+      ]),
+      h(JsonViewer, {
+        value: JSON_EVENT_SAMPLE,
+        expandAll: true,
+        shader: composeShaders(
+          fieldShader({ unit: timingShader() }),
+          languageShader('log'),
+        ),
+        rootLabel: 'composeShaders(fieldShader({ unit: timingShader() }), languageShader("log"))',
+        cls: 'gal-json-box',
+      }),
+      note(`${t('app.examples.jsonviewer-shader-note')} ${t('app.examples.jsonviewer-shader-registered')}${listJsonShaders().join(', ')}`),
     ]),
     demoCard(t('app.examples.section-log'), [
       h(LogPanel, { title: t('app.examples.log-title'), lines: LOG_LINES, maxHeight: '9rem' }),
@@ -1739,6 +2032,10 @@ if (COVERAGE.missing.length || COVERAGE.unknown.length) {
 const API_COVERAGE = apiCoverageReport();
 if (API_COVERAGE.missing.length || API_COVERAGE.unknown.length) {
   console.warn('[examples] 端点清单与 core/qxssh-api.js 不一致', API_COVERAGE);
+}
+const SDK_COVERAGE = sdkCoverageReport();
+if (SDK_COVERAGE.missing.length || SDK_COVERAGE.unknown.length) {
+  console.warn('[examples] SDK 演示清单与 qxssh-sdk.js 的 qx 命名空间不一致', SDK_COVERAGE);
 }
 
 const NO_PROPS = {};

@@ -1,3 +1,11 @@
+/**
+ * app.js —— 应用商店主入口
+ * 浏览 / 搜索已安装应用，校验并安装 .qxp 包、下载链接或 Git 仓库（含分支选择），
+ * 以及启用 / 禁用与卸载。数据面全部走 qxssh-api 的 apps/* 接口。
+ * 三条安装入口共用 doInstall：先 validate 拿确认信息，用户确认后才 install，
+ * 因此每个入口的载荷形态必须与 qxssh-api 的 appPkgRequest 分支一一对应。
+ * Git 入口不内置任何官方仓库：仓库地址由用户自行填写，子目录按需填写。
+ */
 import { bootAppNoInit, notifyAppsChanged, reloadApp } from '/assets/js/app-bridge.js';
 import { setupI18n, t, tf, lang } from '/assets/js/core/i18n.js';
 
@@ -7,11 +15,11 @@ import { signal } from '/assets/js/core/signal.js';
 import { toast, confirmAction } from '/assets/js/core/ui.js';
 import {
   sidebarSections, searchBox,
-  badge, statTile, emptyState, kvGrid, iconButton,
+  badge, statTile, emptyState, kvGrid, iconButton, tipAttrs,
 } from '/assets/js/core/components.js';
 import { createAppShell } from '/assets/js/core/app-shell.js';
 import {
-  listUserApps, validateApp, installApp, uninstallApp, setAppEnabled, auditNote, linkApp,
+  listUserApps, validateApp, installApp, uninstallApp, setAppEnabled, auditNote, linkApp, getGitBranches,
 } from '/assets/js/core/qxssh-api.js';
 import { appIcon } from '/assets/js/icons/index.js';
 import { setIconHidden, hiddenIconIds } from '/assets/js/desktop/iconvis.js';
@@ -53,7 +61,49 @@ function boot(el) {
   const dirInput = { current: null };
   const devBusy = signal(false);
   const devMsg = signal('');
+  const gitUrlInput = { current: null };
+  const gitBranchInput = { current: null };
+  const gitPathInput = { current: null };
+  const gitBusy = signal(false);
+  const gitMsg = signal('');
+  const gitDetecting = signal(false);
+  const gitBranches = signal([]);
+  const gitDefaultBranch = signal('');
+  const gitSelectedBranch = signal('');
+  const gitCustomBranch = signal(false);
   const fileInput = { current: null };
+
+  let lastDetectedUrl = '';
+  const detectBranches = debounce(async (rawUrl) => {
+    const url = (rawUrl || '').trim();
+    if (!url || url === lastDetectedUrl) return;
+    if (url.length < 5) return;
+    lastDetectedUrl = url;
+    gitDetecting.next = true;
+    gitMsg.next = '';
+    try {
+      const res = await getGitBranches(url);
+      const list = Array.isArray(res?.branches) ? res.branches : [];
+      const def = res?.defaultBranch || (list[0] || '');
+      gitBranches.next = list;
+      gitDefaultBranch.next = def;
+      gitSelectedBranch.next = def;
+      gitCustomBranch.next = false;
+    } catch (e) {
+      gitBranches.next = [];
+      gitDefaultBranch.next = '';
+      gitSelectedBranch.next = '';
+      const errMsg = e?.message || '';
+      if (errMsg) gitMsg.next = tf('app.store.err-git-detect-failed', { v1: errMsg });
+    } finally {
+      gitDetecting.next = false;
+    }
+  }, 450);
+
+  function triggerDetectBranches() {
+    const u = (gitUrlInput.current ? gitUrlInput.current.value : '').trim();
+    if (u) void detectBranches(u);
+  }
 
   const onSearch = debounce((v) => { query.next = v; }, 250);
 
@@ -145,6 +195,7 @@ function boot(el) {
   function sourceBadge(a) {
     if (a.disabled === true) return badge(t('app.store.tab-disabled'), 'warning');
     if (a.dev === true) return badge(t('app.store.source-dev'), 'warning');
+    if (a.source === 'git' || a.git) return badge('Git', 'primary');
     return isBuiltin(a) ? badge(t('app.store.source-system'), 'default') : badge(t('app.store.source-user'), 'success');
   }
 
@@ -207,31 +258,56 @@ function boot(el) {
       ]),
       h('div', { class: 'dialog-body' }, [
         h('p', { class: 'am-detail-desc', text: appDesc(a) || t('app.store.desc-missing-installed') }),
-        kvGrid([
-          [t('app.store.field-id'), a.id || '—'],
-          [t('app.store.field-version'), a.version ? 'v' + a.version : '—'],
-          [t('app.store.field-author'), a.author || '—'],
-          [t('app.store.field-category'), catOf(a)],
-          [t('app.store.field-entry'), a.entry || 'index.html'],
-          [t('app.store.field-source'), isBuiltin(a) ? t('app.store.source-builtin') : t('app.store.source-installed')],
-          [t('app.store.field-status'), canToggle(a) ? (a.disabled === true ? t('app.store.tab-disabled') : t('app.store.status-enabled')) : t('app.store.status-always-on')],
-          [t('app.store.field-permissions'), Array.isArray(a.permissions) && a.permissions.length
-            ? a.permissions.join('、') : t('app.store.perm-none')],
-          [t('app.store.field-preferred-size'), a.preferredSize
-            ? `${a.preferredSize.width || '—'} × ${a.preferredSize.height || '—'}`
-              + ((a.preferredSize.minWidth || a.preferredSize.minHeight)
-                ? tf('app.store.preferred-size-min', {
-                  v1: a.preferredSize.minWidth || '—',
-                  v2: a.preferredSize.minHeight || '—',
-                }) : '')
-            : '—'],
-          [t('app.store.field-singleton'), a.singleton === true ? t('app.store.yes') : t('app.store.no')],
-        ]),
+        (() => {
+          const rows = [
+            [t('app.store.field-id'), a.id || '—'],
+            [t('app.store.field-version'), a.version ? 'v' + a.version : '—'],
+            [t('app.store.field-author'), a.author || '—'],
+            [t('app.store.field-category'), catOf(a)],
+            [t('app.store.field-entry'), a.entry || 'index.html'],
+            [t('app.store.field-source'), isBuiltin(a) ? t('app.store.source-builtin') : (a.dev ? t('app.store.source-dev') : (a.git ? t('app.store.source-git') : t('app.store.source-installed')))],
+            [t('app.store.field-status'), canToggle(a) ? (a.disabled === true ? t('app.store.tab-disabled') : t('app.store.status-enabled')) : t('app.store.status-always-on')],
+            [t('app.store.field-permissions'), Array.isArray(a.permissions) && a.permissions.length
+              ? a.permissions.join('、') : t('app.store.perm-none')],
+            [t('app.store.field-preferred-size'), a.preferredSize
+              ? `${a.preferredSize.width || '—'} × ${a.preferredSize.height || '—'}`
+                + ((a.preferredSize.minWidth || a.preferredSize.minHeight)
+                  ? tf('app.store.preferred-size-min', {
+                    v1: a.preferredSize.minWidth || '—',
+                    v2: a.preferredSize.minHeight || '—',
+                  }) : '')
+              : '—'],
+            [t('app.store.field-singleton'), a.singleton === true ? t('app.store.yes') : t('app.store.no')],
+          ];
+          if (a.git) {
+            rows.push([t('app.store.field-git-repo'), a.git.url || '—']);
+            if (a.git.branch) rows.push([t('app.store.field-git-branch'), a.git.branch]);
+            if (a.git.commit) rows.push([t('app.store.field-git-commit'), a.git.commit]);
+            if (a.git.path) rows.push([t('app.store.field-git-path'), a.git.path]);
+          }
+          return kvGrid(rows);
+        })(),
         Array.isArray(a.keywords) && a.keywords.length
           ? h('div', { class: 'am-detail-kw' },
             a.keywords.map((k) => h('span', { class: 'am-kw', text: k })))
           : null,
       ]),
+      a.git ? h('div', { class: 'dialog-foot', style: { paddingTop: '10px' } }, [
+        h('span', { class: 'qx-grow' }),
+        h('button', {
+          class: 'btn btn-outline btn-sm',
+          text: t('app.store.action-git-update'),
+          onClick: () => {
+            close();
+            void doInstall({
+              validate: () => validateApp({ git: a.git.url, branch: a.git.branch, path: a.git.path }),
+              run: () => installApp({ git: a.git.url, branch: a.git.branch, path: a.git.path }),
+              busy: gitBusy,
+              msg: gitMsg,
+            });
+          },
+        }),
+      ]) : null,
     ])));
     close = isl.close;
   }
@@ -416,6 +492,192 @@ function boot(el) {
       }),
     ]);
 
+    const gitForm = h('form', {
+      class: 'am-install-card',
+      onSubmit: (e) => {
+        e.preventDefault();
+        const url = (gitUrlInput.current ? gitUrlInput.current.value : '').trim();
+        if (!url) { toast(t('app.store.err-git-required'), 'warning'); return; }
+        const branch = (gitCustomBranch.value
+          ? (gitBranchInput.current ? gitBranchInput.current.value : gitSelectedBranch.value)
+          : (gitSelectedBranch.value || gitDefaultBranch.value)).trim();
+        const path = (gitPathInput.current ? gitPathInput.current.value : '').trim();
+        const payload = { git: url, branch, path };
+        void doInstall({
+          validate: () => validateApp(payload),
+          run: () => installApp(payload)
+            .then((m) => {
+              if (gitUrlInput.current) gitUrlInput.current.value = '';
+              if (gitBranchInput.current) gitBranchInput.current.value = '';
+              if (gitPathInput.current) gitPathInput.current.value = '';
+              gitBranches.next = [];
+              gitDefaultBranch.next = '';
+              gitSelectedBranch.next = '';
+              gitCustomBranch.next = false;
+              lastDetectedUrl = '';
+              return m;
+            }),
+          busy: gitBusy,
+          msg: gitMsg,
+        });
+      },
+    }, [
+      installHead(t('app.store.install-from-git'), t('app.store.install-from-git-hint'), 'git-branch'),
+      h('div', { class: 'am-install-row' }, [
+        h('input', {
+          ref: (el) => { gitUrlInput.current = el; },
+          class: 'input am-url mono', type: 'text', spellcheck: 'false',
+          placeholder: t('app.store.git-repo-placeholder'),
+          ...tipAttrs(t('app.store.field-git-repo')),
+          onInput: (e) => {
+            const v = e.target.value.trim();
+            if (!v) {
+              lastDetectedUrl = '';
+              gitBranches.next = [];
+              gitDefaultBranch.next = '';
+              gitSelectedBranch.next = '';
+              gitCustomBranch.next = false;
+              gitDetecting.next = false;
+              gitMsg.next = '';
+            } else {
+              detectBranches(v);
+            }
+          },
+          onChange: () => triggerDetectBranches(),
+          onBlur: () => triggerDetectBranches(),
+        }),
+        iconButton('refresh', {
+          tip: t('app.store.git-branch-refresh'),
+          disabled: gitDetecting.value,
+          onClick: () => triggerDetectBranches(),
+        }),
+      ]),
+      h('div', { class: 'am-install-row' }, [
+        (() => {
+          if (gitDetecting.value) {
+            return h('select', {
+              class: 'select mono',
+              style: { flex: '1', minWidth: '0' },
+              disabled: true,
+              ...tipAttrs(t('app.store.git-branch-detecting-tip')),
+            }, [
+              h('option', { text: t('app.store.git-branch-detecting') }),
+            ]);
+          }
+          if (gitBranches.value.length > 0 && !gitCustomBranch.value) {
+            const opts = gitBranches.value.map((b) => h('option', {
+              value: b,
+              selected: b === gitSelectedBranch.value,
+              text: b === gitDefaultBranch.value ? `${b} (${t('app.store.git-branch-default')})` : b,
+            }));
+            opts.push(h('option', {
+              value: '__custom__',
+              text: t('app.store.git-branch-custom-opt'),
+            }));
+            return h('div', { style: { flex: '1', minWidth: '0', display: 'flex', alignItems: 'center', gap: '8px' } }, [
+              h('select', {
+                class: 'select mono',
+                style: { flex: '1', minWidth: '0' },
+                ...tipAttrs(t('app.store.field-git-branch')),
+                value: gitSelectedBranch.value,
+                onChange: (e) => {
+                  if (e.target.value === '__custom__') {
+                    gitCustomBranch.next = true;
+                    gitSelectedBranch.next = '';
+                  } else {
+                    gitSelectedBranch.next = e.target.value;
+                  }
+                },
+              }, opts),
+              iconButton('edit', {
+                tip: t('app.store.git-branch-custom-opt'),
+                onClick: () => {
+                  gitCustomBranch.next = true;
+                  gitSelectedBranch.next = '';
+                },
+              }),
+            ]);
+          }
+          return h('div', { style: { flex: '1', minWidth: '0', display: 'flex', alignItems: 'center', gap: '8px' } }, [
+            h('input', {
+              ref: (el) => { gitBranchInput.current = el; },
+              class: 'input mono', type: 'text', spellcheck: 'false',
+              style: { flex: '1', minWidth: '0' },
+              value: gitSelectedBranch.value,
+              placeholder: t('app.store.git-branch-placeholder'),
+              ...tipAttrs(t('app.store.field-git-branch')),
+              onInput: (e) => { gitSelectedBranch.next = e.target.value; },
+            }),
+            gitBranches.value.length > 0 ? iconButton('list', {
+              tip: t('app.store.git-branch-switch-select'),
+              onClick: () => {
+                gitCustomBranch.next = false;
+                gitSelectedBranch.next = gitDefaultBranch.value || (gitBranches.value[0] || '');
+              },
+            }) : null,
+          ]);
+        })(),
+      ]),
+      h('div', { class: 'am-install-row' }, [
+        h('input', {
+          ref: (el) => { gitPathInput.current = el; },
+          class: 'input am-url mono', type: 'text', spellcheck: 'false',
+          placeholder: t('app.store.git-path-placeholder'),
+          ...tipAttrs(t('app.store.field-git-path')),
+        }),
+      ]),
+      h('div', { class: 'am-install-row' }, [
+        (() => {
+          if (gitMsg.value) {
+            return h('span', {
+              class: 'help am-msg',
+              style: { flex: '0 1 auto', maxWidth: '55%', minWidth: '0' },
+              text: gitMsg.value,
+              ...tipAttrs(gitMsg.value),
+            });
+          }
+          if (gitDetecting.value) {
+            return h('div', {
+              class: 'am-msg am-msg-row',
+              style: { flex: '0 1 auto', maxWidth: '55%', minWidth: '0' },
+            }, [
+              h('span', { class: 'cmp-spinner', style: { width: '12px', height: '12px', borderWidth: '1.5px', flexShrink: '0' } }),
+              h('span', {
+                class: 'help am-msg-text',
+                style: { color: 'var(--muted-foreground)' },
+                text: t('app.store.git-branch-detecting-msg'),
+              }),
+            ]);
+          }
+          if (gitBranches.value.length > 0) {
+            const detail = tf('app.store.git-branches-detected-full', {
+              v1: gitBranches.value.length,
+              v2: gitDefaultBranch.value || 'HEAD',
+            });
+            return h('div', {
+              class: 'am-msg am-msg-row',
+              style: { flex: '0 1 auto', maxWidth: '55%', minWidth: '0' },
+              ...tipAttrs(detail),
+            }, [
+              badge(tf('app.store.git-branches-badge', { v1: gitBranches.value.length }), 'primary'),
+              h('span', {
+                class: 'help am-msg-text',
+                style: { color: 'var(--muted-foreground)' },
+                text: tf('app.store.git-branches-default-hint', { v1: gitDefaultBranch.value || 'HEAD' }),
+              }),
+            ]);
+          }
+          return null;
+        })(),
+        h('button', {
+          class: 'btn btn-primary btn-sm', type: 'submit',
+          style: { flex: '1', minWidth: '0' },
+          text: gitBusy.value ? t('app.store.status-cloning') : t('app.store.action-git-install'),
+          disabled: gitBusy.value || gitDetecting.value,
+        }),
+      ]),
+    ]);
+
     const devForm = h('form', {
       class: 'am-install-card',
       onSubmit: async (e) => {
@@ -460,7 +722,7 @@ function boot(el) {
         h('div', { class: 'am-head-title', text: t('app.store.action-install') }),
         h('div', { class: 'am-head-sub', text: t('app.store.install-dialog-title') }),
       ])]),
-      h('div', { class: 'am-scroll' }, h('div', { class: 'am-install-grid' }, [urlForm, fileCard, devForm])),
+      h('div', { class: 'am-scroll' }, h('div', { class: 'am-install-grid' }, [urlForm, fileCard, gitForm, devForm])),
     ]);
   }
 

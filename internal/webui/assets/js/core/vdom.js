@@ -523,6 +523,10 @@ function setProp(el, k, val, old) {
 }
 
 function applyStyle(el, next, old) {
+  if (typeof next === 'string') {
+    el.style.cssText = next;
+    return;
+  }
   const n = next || {};
   const o = old || {};
   for (const k of Object.keys(o)) {

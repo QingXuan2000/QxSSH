@@ -63,7 +63,7 @@ QxSSH is a single-binary, self-hosted web application written in Go. It turns an
 - **sudo Session Escalation**: Request administrator elevation per host; passwords reside only in memory (default 30-minute expiration) with manual instant wipe support.
 - **Scheduled Jobs (Cron)**: Built-in 5-field cron engine executing automated tasks on designated remote hosts.
 - **Deep Audit Logging**: Comprehensive tracking of every API call including caller app ID, target host, endpoint, duration, and status. In verbose mode, request headers and bodies are encrypted with AES-256-GCM at rest, with workspace-based log rotation, sanitized zip archiving, and retention-based pruning.
-- **Micro-Kernel Plugin Ecosystem**: 11 built-in core system apps, support for third-party `.qxp` package installation, live dev-mode symlinking, and a strict zero-default fine-grained permission model.
+- **Micro-Kernel Plugin Ecosystem**: 11 built-in core system apps, support for installing third-party apps from `.qxp` packages, download links, or Git repositories, live dev-mode symlinking, and a strict zero-default fine-grained permission model.
 - **Private Storage and Secrets**: Each app is provisioned with an isolated storage space and an AES-256-GCM encrypted secret key-value store.
 - **Native Internationalization**: Full bilingual English and Simplified Chinese dictionaries with host/app separation and server-side `Accept-Language` negotiation.
 
@@ -251,12 +251,22 @@ QxSSH utilizes a modular micro-frontend architecture. All 11 built-in applicatio
 | **Hosts** | `hosts` | System | Host and jump-chain management, OpenSSH config import, and probing |
 | **Tunnels** | `tunnels` | Network | Local, remote, and dynamic SOCKS5 port forwarding management |
 | **Browser** | `browser` | Network | Embedded browser for remote internal web consoles via web proxies |
-| **Docker** | `docker` | System | Container monitoring, image pulls, volume/network inspection, Compose stacks |
 | **Batch** | `batch` | Tools | Run shell commands in parallel across multiple hosts with aggregated output |
 | **Task Monitor** | `taskmon` | System | Real-time CPU/memory load graphs, process trees, and elevated process termination |
 | **Audit Log** | `logs` | System | Live audit log viewer, permission grant tracking, and archive downloads |
 | **Settings** | `settings` | System | Desktop themes, Hero Patterns wallpaper textures, taskbar layout, and preferences |
-| **App Manager** | `store` | System | Browse installed apps, install `.qxp` packages, enable/disable, and uninstall |
+| **App Manager** | `store` | System | Browse installed apps, install from Git repositories / download links / local `.qxp` packages, enable/disable, and uninstall |
+| **Systemd Manager** | `systemd` | System | Inspect and control Linux services, sockets, and timers (requires a systemd host) |
+
+Docker Manager is no longer bundled with the main binary. Official app repository:
+
+```
+https://github.com/QingXuan2000/QxSSH-AppStore.git
+```
+
+Each app in that repository lives in its own `apps/<app-id>` subdirectory; Docker Manager is at `apps/docker`. In App Manager → **Install from Git repository**, enter the repository URL above and set the subdirectory to `apps/docker` to clone and install directly. You can also use "Link directory" for development, or upload a packaged `.qxp`. The URL is always shown in the install panel with one-click copy / fill.
+
+Git-repo installs run on the built-in pure-Go Git engine (`go-git`); **no system `git` CLI is required on the host running QxSSH**.
 
 ### Inter-App API Calls (RPC)
 
@@ -325,6 +335,19 @@ Any web project can be packaged or linked as a native QxSSH desktop application 
 
 > [!WARNING]
 > Third-party apps must not declare `systemApp: true` or `disableable: true`. These flags are reserved strictly for system built-in applications.
+
+#### Theme-aware icons
+
+`icon` accepts either a string or an object:
+
+```json
+{ "icon": "server-cog" }
+{ "icon": { "light": "logo-light.svg", "dark": "logo-dark.svg" } }
+```
+
+- Each side is a built-in icon name or a relative file inside the package (`.svg` `.png` `.jpg` `.ico` `.gif` `.webp`); file values are checked for existence and extension when the package is installed.
+- Supplying only `light` or only `dark` makes both themes use that value; identical values collapse into a single icon.
+- Both icons are mounted at once and the root `.dark` class toggles which one is visible, so switching themes needs no re-render of the app list, desktop icons, or taskbar.
 
 ### Developing Apps with the SDK
 
@@ -397,6 +420,8 @@ Install the package via the desktop **App Manager** by clicking **Install App** 
 ### Sample App Template
 
 A complete reference implementation is available in [`examples/Examples/`](examples/Examples/) (see its [README.en.md](examples/Examples/README.en.md)). It covers 100% of SDK functions and UI components, including live API coverage tests.
+
+The official app repository is [`QxSSH-AppStore`](https://github.com/QingXuan2000/QxSSH-AppStore) (`https://github.com/QingXuan2000/QxSSH-AppStore.git`). It hosts Docker Manager and other official apps built on the same manifest / SDK spec; each app sits in its own `apps/<app-id>` subdirectory and installs straight from App Manager by entering the repository URL plus subdirectory — it is also the place to read real app code.
 
 ---
 

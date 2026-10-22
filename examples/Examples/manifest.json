@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "description": "Examples 开发示例应用：组件库、系统 API、宿主桥、统一 SDK 与平台模块全量演示的活文档，带自检",
   "author": "QxSSH",
-  "icon": "layout",
+  "icon": { "light": "icon-light.svg", "dark": "icon-dark.svg" },
   "category": "开发",
   "keywords": [
     "example", "gallery", "components", "icons", "api", "示例", "开发", "组件",

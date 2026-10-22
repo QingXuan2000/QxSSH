@@ -43,6 +43,10 @@ import {
   CodeEditor, codeField, highlightCode, highlightHTML, tokenize, languages, languageForFile, isTextFile,
   registerLanguage, canonicalLanguage, TOKEN_TYPES,
 } from './core/code-editor.js';
+import {
+  languageShader, timingShader, composeShaders, fieldShader,
+  defineJsonShader, getJsonShader, listJsonShaders,
+} from './core/json-shader.js';
 import { VirtualList, scrollToRow } from './core/virtual-list.js';
 import { LineChart, timeSeries, loadChartLib } from './core/charts.js';
 import {
@@ -68,6 +72,8 @@ export {
   ensureSudo, ShellError, runMany, startJob, jobHandle, followJob, jobs, collectMetrics, collectHostInfo,
   CodeEditor, codeField, highlightCode, highlightHTML, tokenize, languages, languageForFile, isTextFile,
   registerLanguage, canonicalLanguage, TOKEN_TYPES,
+  languageShader, timingShader, composeShaders, fieldShader,
+  defineJsonShader, getJsonShader, listJsonShaders,
   VirtualList, scrollToRow, LineChart, timeSeries, loadChartLib,
   batchExec, batchUpload,
   auditStats, exportAuditLogs, auditLogs, auditNote,
@@ -167,6 +173,14 @@ export const qx = {
   registerLanguage,
   canonicalLanguage,
   TOKEN_TYPES,
+
+  languageShader,
+  timingShader,
+  composeShaders,
+  fieldShader,
+  defineJsonShader,
+  getJsonShader,
+  listJsonShaders,
 
   VirtualList,
   scrollToRow,

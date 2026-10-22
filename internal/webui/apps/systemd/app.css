@@ -1,0 +1,853 @@
+/* ============================================================
+   QxSSH Systemd Manager - App Specific Extensions
+   (Precise CSS Grid Layout matching official Docker & Files apps)
+   ============================================================ */
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-root > .qx-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sd-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 核心卡片外边距与弹性填充 */
+.cmp-card.qx-card-fill {
+  margin: 12px;
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 内部核心滚动区 (表头固定、内容独立纵向平滑滚动) */
+.qx-card-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  position: relative;
+  background: var(--card);
+}
+
+.qx-shell .qx-card-scroll > * {
+  width: 100%;
+}
+
+/* 工具栏样式 (参考 dk-toolbar，元素垂直居中且间距工整) */
+.sd-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+  min-height: 44px;
+}
+
+.sd-toolbar .qx-search {
+  max-width: 220px;
+  flex: 1 1 160px;
+}
+
+.sd-toolbar .cmp-chips {
+  flex: none;
+}
+
+.sd-toolbar .select {
+  height: 28px;
+  font-size: 0.75rem;
+  /* 覆盖 global .select 的 width:100%，让下拉按内容自适应宽度 */
+  width: auto;
+}
+
+.sd-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 左右分栏主体结构 (与 docker 的 dk-body / dk-listcol / dk-detail 保持一致) */
+.sd-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.sd-listcol {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 当详情面板展开时，服务列表卡片与详情面板间距各占 6px，外沿保持 12px */
+.sd-body:has(.sd-detail) .sd-listcol > .cmp-card.qx-card-fill {
+  margin: 12px 6px 12px 12px;
+}
+
+/* 分隔条与两侧卡片上下沿对齐：两张卡片各留 12px 上下外边距，
+   分隔条同步内缩，避免竖线与其热区顶到容器上下边缘 (对齐 dk-body 的观感) */
+.sd-body > .qx-splitter {
+  margin: 12px 0;
+}
+
+/* 分隔线做成胶囊：2px 竖条 + 全圆角端帽，替代全局那条 10px 的渐变色带 */
+.sd-body > .qx-splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  right: -5px;
+}
+
+.sd-body > .qx-splitter::after {
+  left: 50%;
+  right: auto;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 999px;
+  background: var(--hairline);
+}
+
+.sd-body > .qx-splitter:hover::after {
+  background: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.sd-body > .qx-splitter.dragging::after {
+  background: var(--primary);
+}
+
+/* 网格列表容器 (参考 dk-row 和 fm-row，杜绝原生 table 错位) */
+.sd-grid-head {
+  display: grid;
+  grid-template-columns: 26px 105px minmax(140px, 1.2fr) 85px 85px minmax(160px, 1.5fr) 105px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--card);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.sd-grid-row {
+  display: grid;
+  grid-template-columns: 26px 105px minmax(140px, 1.2fr) 85px 85px minmax(160px, 1.5fr) 105px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+  transition: background var(--dur-1, 0.1s) ease;
+}
+
+.sd-grid-row:hover {
+  background: var(--row-hover);
+}
+
+.sd-grid-row.selected {
+  background: var(--row-active);
+}
+
+/* 勾选行：弱化底色，避免与「选中详情」的 row-active 混淆 */
+.sd-grid-row.checked {
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+}
+
+/* 勾选列 */
+.sd-col-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.sd-col-check .cmp-check {
+  margin: 0;
+}
+
+.sd-col-check .cmp-check input {
+  width: 14px;
+  height: 14px;
+}
+
+/* 各列对齐与文本截断 */
+.sd-col-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.sd-col-name {
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-col-sub, .sd-col-enabled {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-col-desc {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-col-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  /* 与右侧滚动条/卡片边缘留出呼吸间距，避免末个按钮贴边 */
+  padding-right: 8px;
+}
+
+.sd-col-actions .btn {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+}
+
+/* 响应式自适应列隐藏 (借鉴 docker 与 files) */
+@media (max-width: 1160px) {
+  .sd-grid-head, .sd-grid-row {
+    grid-template-columns: 26px 105px minmax(130px, 1.2fr) 85px 85px 105px;
+  }
+  .sd-col-desc { display: none; }
+}
+
+@media (max-width: 820px) {
+  .sd-grid-head, .sd-grid-row {
+    grid-template-columns: 26px 100px minmax(120px, 1fr) 80px 100px;
+  }
+  .sd-col-sub { display: none; }
+}
+
+/* Timers 专属网格列 (定时器 / 触发服务 / 下次触发 / 剩余 / 操作) */
+.sd-timer-head, .sd-timer-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.1fr) minmax(160px, 1.1fr) minmax(190px, 1.5fr) 96px 96px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sd-timer-head {
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+}
+
+.sd-timer-row:hover {
+  background: var(--row-hover);
+}
+
+/* Sockets 专属网格列 */
+.sd-socket-head, .sd-socket-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1.2fr) minmax(160px, 1.2fr) 72px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sd-socket-head {
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+}
+
+.sd-socket-row:hover {
+  background: var(--row-hover);
+}
+
+/* 右侧详情面板 (参考 docker dk-detail) */
+.sd-detail {
+  margin: 12px 12px 12px 6px;
+  flex: 0 0 clamp(360px, 40%, 540px);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2xs);
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  .sd-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .sd-body:has(.sd-detail) .sd-listcol > .cmp-card.qx-card-fill {
+    margin: 12px 12px 6px 12px;
+    flex: 1 0 340px;
+  }
+  .sd-detail {
+    margin: 6px 12px 12px 12px;
+    flex: 1 0 auto;
+    /* 列布局下忽略拖拽保存的横向宽度，改用 min-height 保证详情区高度 */
+    flex-basis: auto !important;
+    min-height: 360px;
+    max-height: none;
+  }
+  /* 纵向堆叠时分隔条无意义，隐藏 (与全局 .qx-splitter 断点叠加) */
+  .sd-body > .qx-splitter {
+    display: none;
+  }
+}
+
+.sd-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* 详情页签条：横向可滚动，标签之间留呼吸间距，不挤压、不贴边 */
+.sd-detail-tabs {
+  flex: none;
+  min-width: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.sd-detail-tabs .cmp-tabs {
+  /* 外框已有分隔线，去掉组件自带的下边框避免双线 */
+  border-bottom: 0;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  /* 让滚动能力肉眼可见：细滚动条替代默认隐藏 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline) transparent;
+  -webkit-overflow-scrolling: touch;
+  /* 为 3px 滚动条留出空间，标签文字不贴着细条 */
+  padding-bottom: 3px;
+}
+
+/* 覆盖组件的 display:none，恢复一条 3px 细滚动条 */
+.sd-detail-tabs .cmp-tabs::-webkit-scrollbar {
+  display: block;
+  height: 3px;
+}
+
+.sd-detail-tabs .cmp-tabs::-webkit-scrollbar-thumb {
+  background: var(--hairline);
+  border-radius: 999px;
+}
+
+.sd-detail-tabs .cmp-tabs::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+
+.sd-detail-tabs .cmp-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sd-detail-tabs .cmp-tab-top {
+  padding: 0 8px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* 首尾项各自保留 4px，避免标签文字与容器边缘/滚动条贴死 */
+.sd-detail-tabs .cmp-tab-top:first-child {
+  margin-left: 2px;
+}
+
+.sd-detail-tabs .cmp-tab-top:last-child {
+  margin-right: 2px;
+}
+
+.sd-detail-title-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sd-detail-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sd-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.sd-detail-body .cmp-kv-grid {
+  gap: 6px 14px;
+  font-size: 0.76rem;
+}
+
+.sd-detail-body .cmp-code,
+.sd-detail-body .cmp-log {
+  padding: 8px 10px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+/* 状态栏弹性撑开 */
+.sd-status-grow {
+  flex: 1;
+}
+
+/* Journal 日志滚动区域 */
+.sd-log-scroll {
+  display: flex;
+  flex-direction: column;
+}
+
+.sd-log-scroll > .cmp-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow-y: auto;
+}
+
+/* ============================================================
+   宽对话框（诊断包 / 校验结果）
+   ============================================================ */
+
+.dialog.sd-dialog-wide {
+  max-width: min(920px, 92vw);
+}
+
+.sd-dialog-code .cmp-code {
+  max-height: 52vh;
+}
+
+/* ============================================================
+   批量操作条 / 失败横幅
+   ============================================================ */
+
+.sd-batch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  flex: none;
+}
+
+.sd-batch-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.sd-batch .btn {
+  height: 22px;
+  padding: 0 5px;
+  font-size: 0.72rem;
+}
+
+.sd-banner {
+  flex: none;
+  padding: 8px 12px 0;
+  cursor: pointer;
+}
+
+.sd-banner .alert {
+  margin: 0;
+}
+
+/* 工具栏左侧说明文字 */
+.sd-toolbar-hint {
+  font-size: 0.74rem;
+  color: var(--muted-foreground);
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   启动分析页 (systemd-analyze)
+   ============================================================ */
+
+.an-scroll {
+  padding: 14px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.an-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 区块标题左侧加一条主色竖条，四个区块的层级一眼可辨 */
+.an-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.an-sec-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.an-sec-title::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--primary);
+  flex: none;
+}
+
+.an-sec-meta {
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+/* 关键启动链：树体走 JsonViewer，图例放在树外，避免被当成树节点 */
+.an-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.an-json {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted, var(--card));
+  max-height: 460px;
+  overflow: auto;
+}
+
+/* critical-chain 的两行符号说明：缩进对齐树体，弱化到辅助信息层级 */
+.an-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-size: 0.71rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.an-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.an-legend-key {
+  flex: none;
+  width: 14px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+/* 图例符号与树内染色保持一致：@ 红、+ 绿 */
+.an-legend-at { color: var(--destructive); }
+.an-legend-plus { color: var(--success); }
+
+/* 耗时分解：阶段卡片栅格 */
+.an-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.an-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted, var(--card));
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.an-tile:hover {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.an-tile-total {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 7%, var(--muted, var(--card)));
+}
+
+.an-tile-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+
+.an-tile-value {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+
+.an-tile-bar {
+  margin-top: 3px;
+}
+
+.an-progress {
+  height: 4px;
+}
+
+/* 耗时排行：三列栅格，名称可省略、条居中、数值右对齐 */
+.an-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.an-bar-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(120px, 2fr) 76px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.an-bar-row:hover {
+  background: var(--row-hover);
+}
+
+.an-bar-name {
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.an-bar-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 16%, transparent);
+  overflow: hidden;
+}
+
+.an-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--primary) 70%, transparent),
+    var(--primary)
+  );
+}
+
+.an-bar-val {
+  font-size: 0.74rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+
+/* ============================================================
+   单元文件清单 (list-unit-files)
+   ============================================================ */
+
+.uf-grid-head, .uf-grid-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.8fr) 130px 110px 90px 148px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.uf-grid-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  user-select: none;
+}
+
+.uf-grid-row:hover {
+  background: var(--row-hover);
+}
+
+@media (max-width: 1160px) {
+  .uf-grid-head, .uf-grid-row {
+    grid-template-columns: minmax(180px, 1.8fr) 120px 100px 140px;
+  }
+  .uf-grid-head > div:nth-child(4),
+  .uf-grid-row > div:nth-child(4) {
+    display: none;
+  }
+}
+
+/* 日志面板与上方内容拉开呼吸间距 */
+.cmp-log-panel {
+  margin-top: 14px;
+}
+
+/* ══ 工具类层 ══
+   本应用 JS 里用到的排版工具类此前在全局样式表中并不存在
+   （class 写了但没有对应规则，浏览器回退成默认 16px 正文），
+   这里在本应用作用域内补齐，不污染其他应用。 */
+
+/* 字号 */
+.text-xs { font-size: 0.72rem; }
+.text-sm { font-size: 0.8rem; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+
+/* 颜色 */
+.text-muted { color: var(--muted-foreground); }
+.text-primary { color: var(--primary); }
+
+/* 截断 */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 交互 */
+.cursor-pointer { cursor: pointer; }
+
+/* 布局 */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.gap-1\.5 { gap: 6px; }
+.gap-2 { gap: 8px; }
+
+/* 垂直留白 */
+.py-6 { padding-top: 24px; padding-bottom: 24px; }
+.py-8 { padding-top: 32px; padding-bottom: 32px; }
+.py-12 { padding-top: 48px; padding-bottom: 48px; }
+
+/* 下外边距 */
+.mb-2 { margin-bottom: 8px; }
+
+/* 次要说明文字：表格副列、预设、单元类型等，比正文小一档、降饱和、数字等宽 */
+.sd-subtext {
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 面板内引导提示：左侧色条 + 极浅底，与正文段落区分 */
+.sd-hint {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 10px 7px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 0 calc(var(--radius) * 0.4) calc(var(--radius) * 0.4) 0;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}

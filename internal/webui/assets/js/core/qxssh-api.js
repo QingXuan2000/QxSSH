@@ -1,6 +1,8 @@
 /**
  * core/qxssh-api.js —— 宿主后端接口清单
  * 要点：把各 REST/WS 端点封装成前端函数，供页面调用主机、文件、执行、应用、权限、存储等后端能力；只做请求转发，不含业务逻辑。
+ * 约定：函数名与后端路由一一对应（apps/install → installApp），参数形态由后端结构体决定，
+ * 同一路由载荷有多种形态时（如应用包的 url / git / 文件），收口在本文件内做分流，不散到调用方。
  */
 import {
   API_BASE, errorFromResponse, sysFetch, sysGet, sysCall, sysPut, sysUrl, sysWsUrl, sysStream,
@@ -215,14 +217,25 @@ export function listUserApps() {
   return sysGet('apps/list').then((j) => (Array.isArray(j.apps) ? j.apps : []));
 }
 
-/** 校验应用包，返回校验结果 */
+/**
+ * 校验应用包，不安装。三种载荷：
+ * File/Blob（.qxp 本地包）、{ url }（下载链接）、{ git, branch, path }（Git 仓库）。
+ */
 export function validateApp(pkg) {
   return appPkgRequest('apps/validate', pkg);
 }
 
-/** 安装应用包 */
+/**
+ * 安装应用包。载荷形态与 validateApp 相同；Git 仓库安装成功后，
+ * 清单声明的权限由后端一并授予，无需再逐条申请。
+ */
 export function installApp(pkg) {
   return appPkgRequest('apps/install', pkg);
+}
+
+/** 获取远程 Git 仓库的分支列表及默认分支 */
+export function getGitBranches(url) {
+  return sysCall('apps/git-branches', { url });
 }
 
 /** 以目录链接方式加载正在开发的应用 */
@@ -521,6 +534,16 @@ function appPkgRequest(target, pkg) {
     const fd = new FormData();
     fd.append('file', pkg, pkg.name || 'app.qxp');
     return sysFetch('POST', target, { form: fd });
+  }
+  // Git 仓库必须按 git/branch/path 三字段原样发给后端（见 appPackageReq），
+  // 不能落进下面的 url 分支：对象被 String() 成 "[object Object]" 后，后端补协议头
+  // 得到 https://[object Object]，表现是 "下载失败: invalid character in host name"。
+  if (pkg && typeof pkg === 'object' && (pkg.git || pkg.type === 'git')) {
+    return sysCall(target, {
+      git: String(pkg.git || pkg.url || ''),
+      branch: String(pkg.branch || ''),
+      path: String(pkg.path || ''),
+    });
   }
   return sysCall(target, { url: String((pkg && pkg.url) || pkg || '') });
 }

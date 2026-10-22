@@ -76,6 +76,12 @@ a:hover { color: color-mix(in srgb, var(--primary) 82%, var(--foreground)); }
 
 .qicon { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .qicon-img { object-fit: contain; }
+/* 应用图标分主题配色：亮暗两枚同时挂载，只有一枚可见，由根节点 .dark 切换。
+   切换主题时不需要重渲染应用列表、桌面图标与任务栏。 */
+.qicon-swap { display: inline-flex; align-items: center; justify-content: center; }
+.qicon-swap > .qicon-dark { display: none; }
+.dark .qicon-swap > .qicon-light { display: none; }
+.dark .qicon-swap > .qicon-dark { display: inline-block; }
 .qicon-sm { width: 15px; height: 15px; }
 .qicon-bad { color: var(--destructive); }
 .qicon-bad-q { fill: currentColor; stroke: none; }

@@ -222,6 +222,7 @@ func (a *Gateway) routes() http.Handler {
 	a.sysPerm("POST", "apps/validate", "apps:validate", a.handleValidateApp)
 	a.sysPerm("POST", "apps/install", "apps:install", a.handleInstallApp)
 	a.sysPerm("POST", "apps/uninstall", "apps:uninstall", a.handleUninstallApp)
+	a.sysPerm("POST", "apps/git-branches", "apps:validate", a.handleGitBranches)
 
 	a.sysPerm("POST", "apps/link", "apps:link", a.handleLinkApp)
 

@@ -3,6 +3,5 @@ lucide 图标库已搬到 ../../vendor/lucide.min.js，其许可证见 vendor/LI
 目录内其它文件的分工：
 
 - `aliases.js`     本仓库自维护：小写名 → Lucide PascalCase 名的映射表
-- `custom.js`      Lucide 无等价物的少数自定义图标（docker 为 Docker 官方品牌图形，
-                   遵循 Docker trademarks；其余为本项目 UI 概念）
+- `custom.js`      Lucide 无等价物的少数自定义图标（终端提示符、分屏符号等，均为本项目 UI 概念）
 - `index.js`       全站唯一出口：icon() / iconNames() / hasIcon() / appIcon()

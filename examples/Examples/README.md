@@ -64,7 +64,7 @@ Compress-Archive -Path * -DestinationPath ..\examples.qxp -Force
 | **图标库** | 内置全量图标，支持实时名称搜索、分页与点击一键复制图标名 |
 | **组件库** | 聚合全量 79 个官方组件，支持全局组件名实时搜索过滤与分类无缝切换演示 |
 | **系统 API** | `core/qxssh-api.js` 全部 92 个系统 API 端点，按权限节点分组，表格化展示端点、权限、说明、用法与调用，支持实时搜索 |
-| **SDK** | 统一 SDK（`qx` 命名空间）：按权限节点表格化展示各 SDK 方法与运维工具箱（`qx.kit`）用法，支持实时搜索、代码演练场与全量自检 |
+| **SDK** | 统一 SDK（`qx` 命名空间）：29 个分组、167 条演示条目，覆盖 `qx` 全部 150 个顶层导出（含宿主桥、窗口控制、应用间 API、事件总线、i18n、代码高亮、JSON 着色器、虚拟列表与图表、命名空间别名），支持实时搜索、代码演练场与全量自检 |
 
 ## 自检机制
 
@@ -72,7 +72,7 @@ Compress-Archive -Path * -DestinationPath ..\examples.qxp -Force
 
 - **组件自检**：比对 `component-classes.js` 的分类表与所有核心及高级组件的实际导出（79/79 全部覆盖）。
 - **API 自检**：比对 `sysapi-groups.js` 的端点清单与 `core/qxssh-api.js` 的实际导出（92/92 全部覆盖）。
-- **SDK 自检**：自检验证 `qx` 命名空间与 `qx.kit` 的全部导出完备性（100% 覆盖）。
+- **SDK 自检**：`sdkCoverageReport()` 把 `SDK_GROUPS` 里每条 `qx.xxx() / qx.常量 / qx.命名空间` 归一化成顶层键名，与 `Object.keys(qx)` 做双向差集（150/150 全部覆盖，缺项进 `console.warn`）。
 
 这既是示例的特性，也是**给 SDK 维护者的回归保障**：新增或删除一个组件 / 端点而忘了更新示例，示例会立刻提示。
 

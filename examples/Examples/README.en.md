@@ -64,7 +64,7 @@ Copy this directory to `<config dir>/apps/examples/` and restart QxSSH.
 | **Icons** | All built-in icons with real-time name search, pagination, and one-click copy |
 | **Components** | Consolidated all 79 official components with global real-time component search and seamless category switcher |
 | **System APIs** | All 92 `core/qxssh-api.js` endpoints grouped by permission nodes, table-based display of endpoints, permissions, descriptions, usage, and interactive calls, with real-time search |
-| **SDK** | Unified SDK (`qx` namespace): grouped by permission nodes, table-based display of SDK methods and ops toolkit (`qx.kit`) usage, with real-time search, code playground, and full export self-check |
+| **SDK** | Unified SDK (`qx` namespace): 29 groups and 167 demo entries covering all 150 top-level `qx` exports (host bridge, window control, app-to-app APIs, event bus, i18n, code highlighting, JSON shaders, virtual list and charts, namespace aliases), with real-time search, code playground, and full export self-check |
 
 ## How the self-check works
 
@@ -72,7 +72,7 @@ On startup and while rendering it compares each "manifest list" with the real ex
 
 - **Components**: compares the `component-classes.js` map against all core and advanced component exports (79/79 covered).
 - **API**: compares the `sysapi-groups.js` endpoint list against `core/qxssh-api.js` exports (92/92 covered).
-- **SDK**: self-checks completeness of exports on `qx` and `qx.kit` (100% covered).
+- **SDK**: `sdkCoverageReport()` normalizes every `qx.xxx() / qx.CONST / qx.namespace` entry in `SDK_GROUPS` to its top-level key and diffs it both ways against `Object.keys(qx)` (150/150 covered; anything missing goes to `console.warn`).
 
 This is both a demo feature and **a regression guard for SDK maintainers**: add or remove a component/endpoint without updating the sample, and the sample warns immediately.
 

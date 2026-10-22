@@ -59,8 +59,6 @@
   "core.app.batch.desc": "Run commands in bulk: execute in parallel across hosts and collect the results",
   "core.app.browser.name": "Browser",
   "core.app.browser.desc": "Built-in browser: reach intranet web consoles and device admin pages",
-  "core.app.docker.name": "Docker",
-  "core.app.docker.desc": "Containers, images, volumes, networks and Compose stacks in one place; logs and terminals stay in the window",
   "core.app.files.name": "Files",
   "core.app.files.desc": "SFTP file manager: upload, download, rename and inspect permissions",
   "core.app.hosts.name": "Hosts",

@@ -87,8 +87,16 @@
 .cmp-json-tw:hover { background: var(--row-hover); color: var(--foreground); }
 .cmp-json-tw.is-empty { cursor: default; visibility: hidden; }
 .cmp-json-key { color: var(--chart-2); flex: none; }
+/* keySplit 拆出的尾段：占据值的位置，但不加引号、不按值类型上色。
+   必须排在 .cmp-json-at / .cmp-json-plus 之前，否则同特异性的 color 会盖掉时刻染色 */
+.cmp-json-suffix { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* 键内时刻标记染色：@ 取红色（激活时刻），+ 取成功色（自身耗时） */
+.cmp-json-at { color: var(--destructive); font-weight: 600; }
+.cmp-json-plus { color: var(--success); font-weight: 600; }
 .cmp-json-colon, .cmp-json-summary { color: var(--muted-foreground); flex: none; }
 .cmp-json-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 着色后的键与值内部有多个 span，外层不能再按纯文本省略，交给内层片段自己断行 */
+.cmp-json-shaded { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .cmp-json-string { color: var(--chart-1); }
 .cmp-json-number { color: var(--chart-3); }
 .cmp-json-boolean { color: var(--chart-4); }
