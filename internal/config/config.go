@@ -1340,6 +1340,30 @@ func (s *Store) PurgeExpiredRefresh(now int64) (int, error) {
 	return int(n), err
 }
 
+// TrimRefresh 把活跃刷新令牌行裁剪到 keep 条以内，返回删除条数。
+//
+// 「活跃会话」= 一条未吊销、未过期的刷新令牌记录：每次签发与每一轮轮换各产生一条，
+// 轮换会把旧行置为吊销，所以「未吊销行按 last_use 保留最近 keep 条」等价于
+// 「保留最近 keep 个会话」。先清过期行，再按 last_use 从旧到新淘汰超出配额的部分。
+// 被淘汰的只是刷新令牌，已签出的访问 JWT 仍按自身 exp 走完，不会中断正在进行的请求。
+func (s *Store) TrimRefresh(keep int, now int64) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.db.Exec("DELETE FROM app_refresh WHERE exp < ?", now); err != nil {
+		return 0, err
+	}
+	res, err := s.db.Exec("DELETE FROM app_refresh WHERE revoked = 0 AND token NOT IN ("+
+		"SELECT token FROM app_refresh WHERE revoked = 0 ORDER BY last_use DESC, created_at DESC LIMIT ?)", keep)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
 // Prefs 返回全部界面偏好键值。
 func (s *Store) Prefs() (map[string]string, error) {
 	s.mu.RLock()
@@ -1705,5 +1729,3 @@ type SecretMeta struct {
 	Key       string `json:"key"`
 	UpdatedAt int64  `json:"updatedAt"`
 }
-
-

@@ -14,16 +14,23 @@
 }
 .tn-grid .cmp-field-control > .input { flex: 1 1 auto; min-width: 0; }
 .tn-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
-.tn-empty-desc { font-size: 0.74rem; opacity: 0.85; }
 
 .tn-type {
   display: inline-block; padding: 2px 9px; border-radius: 999px;
   font-size: 0.72rem; font-weight: 600;
+  white-space: nowrap; word-break: keep-all;
   background: var(--muted); color: var(--muted-foreground);
 }
 .tn-type-local { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary); }
 .tn-type-remote { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
 .tn-type-dynamic { background: color-mix(in srgb, var(--chart-5) 18%, transparent); color: var(--chart-5); }
+.tn-type-udp { background: color-mix(in srgb, var(--success, var(--primary)) 18%, transparent); color: var(--success, var(--primary)); }
+.tn-type-tun { background: color-mix(in srgb, var(--chart-2, var(--primary)) 18%, transparent); color: var(--chart-2, var(--primary)); }
+
+/* 动态转发的 UDP ASSOCIATE 开关：整行铺开，开关与说明上下排 */
+.tn-udp-field { grid-column: 1 / -1; }
+.tn-udp { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.tn-udp-hint { font-size: 0.68rem; line-height: 1.5; color: var(--muted-foreground); }
 
 @media (max-width: 560px) {
   .tn-grid { grid-template-columns: minmax(0, 1fr); }

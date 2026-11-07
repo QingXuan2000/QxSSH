@@ -89,4 +89,3 @@ func (a *Gateway) handleSetAppPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, okResp{OK: true})
 }
-

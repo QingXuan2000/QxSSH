@@ -1,4 +1,4 @@
-import { detectBrowsers, launchBrowser as launch, prepare } from './browser-core.js';
+import { detectBrowsers, launchBrowser as launch, prepare, resetBrowsers } from './browser-core.js';
 import { t } from '/assets/js/core/i18n.js';
 
 export function prepareBrowsers(info) {
@@ -7,6 +7,11 @@ export function prepareBrowsers(info) {
 
 export function listBrowsers() {
   return detectBrowsers();
+}
+
+/** 丢掉检测缓存，下一次 listBrowsers 会重新扫一遍本机浏览器 */
+export function resetBrowserCache() {
+  resetBrowsers();
 }
 
 export function launchBrowser(url, browser, proxy) {

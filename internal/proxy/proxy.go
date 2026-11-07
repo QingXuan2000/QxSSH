@@ -30,6 +30,100 @@ const (
 	proxyRedirectParam = "__qx_proxy_redirect"
 )
 
+// Stats 记录一个代理实例最近的文档级请求轨迹，供前端还原地址栏与内网导航状态。
+// 只统计「地址栏级导航」（document）：子资源（脚本、样式、接口）只累加 Hits，
+// 否则最后一个 404/500 的子请求会把状态栏刷成错误。
+type Stats struct {
+	mu       sync.Mutex
+	path     string
+	query    string
+	upstream string
+	status   int
+	err      string
+	hits     int64
+	at       time.Time
+}
+
+// State 是代理实例的对外快照，直接以 JSON 返回给前端。
+type State struct {
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	Target   string `json:"target"`
+	Upstream string `json:"upstream"`
+	Path     string `json:"path"`
+	Query    string `json:"query"`
+	Status   int    `json:"status"`
+	Error    string `json:"error"`
+	Hits     int64  `json:"hits"`
+	At       int64  `json:"at"`
+}
+
+func newStats() *Stats { return &Stats{} }
+
+// recordRequest 记录一次请求；命中次数对所有请求累加，路径只对文档请求覆盖。
+func (s *Stats) recordRequest(r *http.Request, upstream string) {
+	s.mu.Lock()
+	s.hits++
+	if isDocumentRequest(r) {
+		p := r.URL.Path
+		if p == "" {
+			p = "/"
+		}
+		s.path, s.query, s.upstream = p, r.URL.RawQuery, upstream
+		s.at = time.Now()
+	}
+	s.mu.Unlock()
+}
+
+// recordResponse 记录响应码；文档请求的状态码覆盖上一条，子资源的 5xx 也记下来。
+func (s *Stats) recordResponse(r *http.Request, status int) {
+	s.mu.Lock()
+	if isDocumentRequest(r) {
+		s.status = status
+		s.err = ""
+		s.at = time.Now()
+	} else if status >= http.StatusInternalServerError {
+		s.status = status
+	}
+	s.mu.Unlock()
+}
+
+// recordError 记录转发失败：文档请求必然覆盖，子资源只在还没有任何状态码时落一笔。
+func (s *Stats) recordError(r *http.Request, err error) {
+	s.mu.Lock()
+	if isDocumentRequest(r) || s.status == 0 {
+		s.status = http.StatusBadGateway
+		s.err = err.Error()
+		s.at = time.Now()
+	}
+	s.mu.Unlock()
+}
+
+func (s *Stats) snapshot(id, link, target string) State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return State{
+		ID: id, URL: link, Target: target,
+		Upstream: s.upstream, Path: s.path, Query: s.query,
+		Status: s.status, Error: s.err, Hits: s.hits,
+		At: s.at.UnixMilli(),
+	}
+}
+
+// isDocumentRequest 判断是否地址栏级导航：优先看 Sec-Fetch-Dest，缺省时看 Accept 是否要 HTML。
+func isDocumentRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	switch strings.ToLower(r.Header.Get("Sec-Fetch-Dest")) {
+	case "document", "iframe", "frame":
+		return true
+	case "":
+		return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/html")
+	}
+	return false
+}
+
 // Instance 描述一个运行中的内网 Web 代理实例。URL 是本机可直接访问的地址。
 type Instance struct {
 	ID     string `json:"id"`
@@ -41,6 +135,15 @@ type Instance struct {
 	srv *http.Server
 	up  *upstream
 	tr  *http.Transport
+	st  *Stats
+}
+
+// State 返回该实例最近一次文档请求的轨迹快照。
+func (it *Instance) State() State {
+	if it.st == nil {
+		return State{ID: it.ID, URL: it.URL, Target: it.Target}
+	}
+	return it.st.snapshot(it.ID, it.URL, it.Target)
 }
 
 // stop 停止该代理实例的 HTTP 服务并关闭空闲连接。
@@ -106,6 +209,23 @@ func (u *upstream) follow(scheme, addr string) bool {
 	return true
 }
 
+// adopt 在一个新代理实例启动时直接确定上游（不走重定向计数），
+// 用于把「纯 HTTP 目标会自己跳 HTTPS」这件事在服务端提前消化掉。
+func (u *upstream) adopt(scheme, addr string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if scheme == u.scheme && addr == u.addr {
+		return
+	}
+	u.scheme, u.addr = scheme, addr
+	for _, o := range u.seen {
+		if o.scheme == scheme && o.addr == addr {
+			return
+		}
+	}
+	u.seen = append(u.seen, origin{scheme: scheme, addr: addr})
+}
+
 func (u *upstream) stripVariants() []string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -169,13 +289,17 @@ func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, us
 		scheme = "https"
 	}
 	up := newUpstream(scheme, target)
+	if !useTLS {
+		probeUpgrade(sshClient, up)
+	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	tr := newProxyTransport(sshClient, up)
-	srv := &http.Server{Handler: newReverseProxy(up, tr)}
+	tr := newProxyTransport(sshClient)
+	st := newStats()
+	srv := &http.Server{Handler: newReverseProxy(up, tr, st)}
 
 	m.mu.Lock()
 	m.seq++
@@ -188,12 +312,24 @@ func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, us
 		srv:    srv,
 		up:     up,
 		tr:     tr,
+		st:     st,
 	}
 	m.items[inst.ID] = inst
 	m.mu.Unlock()
 
 	go func() { _ = srv.Serve(ln) }()
 	return inst, nil
+}
+
+// State 返回指定代理实例最近一次文档请求的轨迹快照。
+func (m *Registry) State(id string) (State, error) {
+	m.mu.Lock()
+	it, ok := m.items[id]
+	m.mu.Unlock()
+	if !ok {
+		return State{}, fmt.Errorf("webproxy not found")
+	}
+	return it.State(), nil
 }
 
 // Stop 停止指定 id 的代理实例。
@@ -239,11 +375,14 @@ func (m *Registry) StopByHost(hostID string) int {
 	return len(stopped)
 }
 
-func newProxyTransport(sshClient *ssh.Client, up *upstream) *http.Transport {
+// newProxyTransport 让每个连接都拨到 Transport 自己解析出来的目标。
+// 之前这里忽略 addr、直接拨 upstream 的当前值，重定向期间并发到达的子资源请求
+// 可能在「Host 头取的是旧上游、拨号取的是新上游」之间错位，命中对面站点不存在的
+// 路径而拿到 4xx；改成按 addr 拨号后，URL/SNI/Host/连接四者永远指向同一个上游。
+func newProxyTransport(sshClient *ssh.Client) *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			_, cur := up.current()
-			return sshClient.Dial("tcp", cur)
+			return sshClient.Dial("tcp", addr)
 		},
 		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 		DisableCompression: true,
@@ -252,13 +391,91 @@ func newProxyTransport(sshClient *ssh.Client, up *upstream) *http.Transport {
 	}
 }
 
-func newReverseProxy(up *upstream, tr *http.Transport) *httputil.ReverseProxy {
+// probeUpgrade 在启动代理前先自己走一遍「HTTP 目标的重定向链」，如果链路终点落在
+// HTTPS 上，就把上游直接定到终点。公开站点（bing.com 这类）在 80 端口通常只留一条
+// 301/302 指向 https，个别站点还要先换域名再升协议；这条链交给浏览器跟，意味着地址栏
+// 里要串好几轮相对 Location 往返，内嵌窗口一旦在其中一环解析错了就是一页错误。
+// 服务端提前走完，浏览器只发起一次文档请求。
+func probeUpgrade(cl *ssh.Client, up *upstream) {
+	if cl == nil {
+		return
+	}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return cl.Dial("tcp", addr)
+		},
+		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+		DisableCompression: true,
+		DisableKeepAlives:  true,
+	}
+	defer tr.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &http.Client{
+		Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	scheme, addr := up.current()
+	cur := scheme + "://" + addr + "/"
+	for hop := 0; hop < maxFollows; hop++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cur, nil)
+		if err != nil {
+			return
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		code := resp.StatusCode
+		loc := resp.Header.Get("Location")
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+		_ = resp.Body.Close()
+		if code < 300 || code >= 400 || loc == "" {
+			return
+		}
+		base, err := url.Parse(cur)
+		if err != nil {
+			return
+		}
+		lu, err := url.Parse(loc)
+		if err != nil {
+			return
+		}
+		lu = base.ResolveReference(lu)
+		if lu.Host == "" || len(lu.Scheme) > 5 {
+			return
+		}
+		ns, naddr := urlToAddr(lu)
+		if ns != "http" && ns != "https" {
+			return
+		}
+		if ns == "https" {
+			up.adopt(ns, naddr)
+			return
+		}
+		path := lu.EscapedPath()
+		if path == "" {
+			path = "/"
+		}
+		cur = ns + "://" + naddr + path
+		if lu.RawQuery != "" {
+			cur += "?" + lu.RawQuery
+		}
+	}
+}
+
+func newReverseProxy(up *upstream, tr *http.Transport, st *Stats) *httputil.ReverseProxy {
 	rp := &httputil.ReverseProxy{}
 
 	rp.Director = func(r *http.Request) {
 		proxyHost := r.Host
 		stripProxyRedirect(r.URL)
 		scheme, addr := up.current()
+		st.recordRequest(r, scheme+"://"+addr)
 		r.URL.Scheme = scheme
 		r.URL.Host = addr
 
@@ -294,6 +511,8 @@ func newReverseProxy(up *upstream, tr *http.Transport) *httputil.ReverseProxy {
 	rp.ModifyResponse = func(resp *http.Response) error {
 		h := resp.Header
 
+		st.recordResponse(resp.Request, resp.StatusCode)
+
 		h.Del("X-Frame-Options")
 		h.Del("Content-Security-Policy")
 		h.Del("Content-Security-Policy-Report-Only")
@@ -304,6 +523,7 @@ func newReverseProxy(up *upstream, tr *http.Transport) *httputil.ReverseProxy {
 	}
 
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		st.recordError(r, err)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = fmt.Fprintf(w, "webproxy 转发失败: %v", err)

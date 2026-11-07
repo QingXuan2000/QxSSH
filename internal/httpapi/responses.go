@@ -40,11 +40,6 @@ type okGrantedResp struct {
 	Granted map[string]string `json:"granted"`
 }
 
-// tokenResp 是旧版「不透明随机串会话」的响应，保留给仍在用旧字段的宿主壳。
-type tokenResp struct {
-	Token string `json:"token"`
-}
-
 // sessionMintResp 是 session/mint 端点的标准响应结构：
 // 访问令牌是可自验签的 JWT，刷新令牌是不透明随机串（只在宿主壳内传递）。
 type sessionMintResp struct {

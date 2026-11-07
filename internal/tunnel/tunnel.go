@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,18 +30,32 @@ type Options struct {
 	Bind   string `json:"bind"`
 	Port   int    `json:"port"`
 	Target string `json:"target"`
+	// Proto 是承载协议：tcp（缺省）或 udp。udp 只支持 Type=local，
+	// 由 startUDP 起一条「本机 UDP ↔ SSH 通道 ↔ 远端中继」的接力转发。
+	Proto string `json:"proto"`
+	// UDP 打开动态转发的 SOCKS5 UDP ASSOCIATE（CMD=3）：浏览器把 UDP 数据报直接交给
+	// 代理，由这条动态转发经 SSH 中继出去。只有 Type=dynamic 时有效。
+	UDP bool `json:"udp"`
+
 }
 
 // Running 描述一条正在运行的端口转发。cancel 用于内部停止该转发的监听循环。
 type Running struct {
-	ID        string    `json:"id"`
-	HostID    string    `json:"hostId"`
-	HostName  string    `json:"hostName"`
-	Type      string    `json:"type"`
-	Listen    string    `json:"listen"`
-	Target    string    `json:"target,omitempty"`
-	Proxy     string    `json:"proxy,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
+	ID       string `json:"id"`
+	HostID   string `json:"hostId"`
+	HostName string `json:"hostName"`
+	Type     string `json:"type"`
+	Proto    string `json:"proto"`
+	// UDP 表示这条动态转发额外提供 SOCKS5 UDP ASSOCIATE。
+	UDP    bool   `json:"udp,omitempty"`
+	Listen string `json:"listen"`
+	Target string `json:"target,omitempty"`
+	Proxy  string `json:"proxy,omitempty"`
+	// Agent / AgentPort 只对 UDP 转发有意义：远端临时目录里的中继文件路径，
+	// 以及它绑在远端回环上的 TCP 端口（本机的 datagram 都从这条通道进去）。
+	Agent     string `json:"agent,omitempty"`
+	AgentPort int    `json:"agentPort,omitempty"`
+	StartedAt    time.Time `json:"startedAt"`
 
 	cancel func()
 }
@@ -149,6 +164,15 @@ func normalizeBind(b string) string {
 // Start 按 Options 启动一条端口转发并返回其运行信息。
 // 会校验类型、绑定地址（本地/动态仅允许回环）与目标格式。
 func (m *Registry) Start(req Options) (*Running, error) {
+	req.Type = strings.ToLower(strings.TrimSpace(req.Type))
+
+	req.Proto = strings.ToLower(strings.TrimSpace(req.Proto))
+	if req.Proto == "" {
+		req.Proto = "tcp"
+	}
+	if req.Proto != "tcp" && req.Proto != "udp" {
+		return nil, errors.New("proto must be tcp|udp")
+	}
 	if req.Type != "local" && req.Type != "remote" && req.Type != "dynamic" {
 		return nil, errors.New("type must be local|remote|dynamic")
 	}
@@ -156,6 +180,14 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		return nil, errors.New("invalid port")
 	}
 	req.Bind = normalizeBind(req.Bind)
+
+	// UDP 走的是另一条路径：先在同一台主机上部署远端中继，再开本机 UDP 监听。
+	if req.Proto == "udp" {
+		if req.Type != "local" {
+			return nil, errors.New("UDP 转发只支持 type=local：SSH 通道只承载 TCP，远端 UDP 监听无法建立")
+		}
+		return m.startUDP(req)
+	}
 
 	if req.Type == "local" || req.Type == "dynamic" {
 		if !loopbackOnly[req.Bind] {
@@ -182,6 +214,12 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		return nil, err
 	}
 
+	// 打开 UDP 的动态转发要额外挂一层 SOCKS5 UDP ASSOCIATE 支持面。
+	var su *socksUDP
+	if req.Type == "dynamic" && req.UDP {
+		su = newSocksUDP(client)
+	}
+
 	listen := net.JoinHostPort(req.Bind, strconv.Itoa(req.Port))
 
 	var ln net.Listener
@@ -193,11 +231,21 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		ln, lerr = client.Listen("tcp", listen)
 	}
 	if lerr != nil {
+		if su != nil {
+			su.close()
+		}
 		return nil, lerr
 	}
 
 	var closeOnce sync.Once
-	closeFn := func() { closeOnce.Do(func() { _ = ln.Close() }) }
+	closeFn := func() {
+		closeOnce.Do(func() {
+			_ = ln.Close()
+			if su != nil {
+				su.close()
+			}
+		})
+	}
 
 	listen = ln.Addr().String()
 
@@ -209,6 +257,8 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		HostID:    req.HostID,
 		HostName:  host.Name,
 		Type:      req.Type,
+		Proto:     "tcp",
+		UDP:       su != nil,
 		Listen:    listen,
 		Target:    req.Target,
 		StartedAt: time.Now(),
@@ -227,7 +277,7 @@ func (m *Registry) Start(req Options) (*Running, error) {
 	case "remote":
 		go runRemote(ln, req.Target)
 	case "dynamic":
-		go runDynamic(ln, client)
+		go runDynamic(ln, client, su)
 	}
 
 	return it, nil
@@ -281,17 +331,19 @@ func runRemote(ln net.Listener, target string) {
 	}
 }
 
-func runDynamic(ln net.Listener, client *ssh.Client) {
+func runDynamic(ln net.Listener, client *ssh.Client, su *socksUDP) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go handleSocks5(client, c)
+		go handleSocks5(client, c, su)
 	}
 }
 
-func handleSocks5(client *ssh.Client, c net.Conn) {
+// handleSocks5 处理一条 SOCKS5 客户端连接：CONNECT 直接开 TCP 通道，
+// UDP ASSOCIATE 交给 su（只有开了 UDP 的动态转发才非 nil）。
+func handleSocks5(client *ssh.Client, c net.Conn, su *socksUDP) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 
@@ -308,8 +360,7 @@ func handleSocks5(client *ssh.Client, c net.Conn) {
 	}
 
 	req := make([]byte, 4)
-	if _, err := io.ReadFull(c, req); err != nil || req[1] != 1 {
-		_, _ = c.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+	if _, err := io.ReadFull(c, req); err != nil {
 		return
 	}
 	var host string
@@ -344,20 +395,32 @@ func handleSocks5(client *ssh.Client, c net.Conn) {
 	if _, err := io.ReadFull(c, pb); err != nil {
 		return
 	}
-	port := binary.BigEndian.Uint16(pb)
-	target := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	port := int(binary.BigEndian.Uint16(pb))
 
-	d, err := client.Dial("tcp", target)
-	if err != nil {
-		_, _ = c.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		return
+	switch req[1] {
+	case 1: // CONNECT：一条 SSH 通道顶一段 TCP 连接
+		target := net.JoinHostPort(host, strconv.Itoa(port))
+		d, err := client.Dial("tcp", target)
+		if err != nil {
+			_, _ = c.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			return
+		}
+		if _, err := c.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			_ = d.Close()
+			return
+		}
+		_ = c.SetDeadline(time.Time{})
+		proxy(c, d)
+	case 3: // UDP ASSOCIATE：控制连接只当存活信号，数据走本机 UDP 中继
+		if su == nil {
+			_, _ = c.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			return
+		}
+		_ = c.SetDeadline(time.Time{})
+		su.associate(c, host, port)
+	default: // BIND 等命令这里不提供
+		_, _ = c.Write([]byte{0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 	}
-	if _, err := c.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
-		_ = d.Close()
-		return
-	}
-	_ = c.SetDeadline(time.Time{})
-	proxy(c, d)
 }
 
 func proxy(a, b net.Conn) {

@@ -51,7 +51,7 @@ type Gateway struct {
 	idp *idpKeys
 	// deny 是访问令牌的 jti 吊销名单（值是令牌过期时间，过期后自动清理）。
 	denyMu sync.RWMutex
-	deny  map[string]int64
+	deny   map[string]int64
 
 	bgMu    sync.Mutex
 	bgProcs map[string]*bgProc
@@ -109,10 +109,16 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.audit = newAuditStore(auditDir(configDir), archiveDir(configDir), store, log)
 	a.appState = loadAppState(store, log)
 
-	if n, perr := store.PurgeExpiredRefresh(time.Now().Unix()); perr != nil {
+	nowUnix := time.Now().Unix()
+	if n, perr := store.PurgeExpiredRefresh(nowUnix); perr != nil {
 		log.Warn("purge expired refresh tokens failed", "error", perr.Error())
 	} else if n > 0 {
 		log.Info("purged expired refresh tokens", "count", n)
+	}
+	if n, terr := store.TrimRefresh(maxSessions, nowUnix); terr != nil {
+		log.Warn("trim refresh tokens failed", "error", terr.Error())
+	} else if n > 0 {
+		log.Info("trimmed refresh tokens", "count", n, "keep", maxSessions)
 	}
 
 	if mgr != nil {
@@ -213,6 +219,7 @@ func (a *Gateway) routes() http.Handler {
 	a.sysPerm("GET", "tunnel/list", "tunnel:list", a.handleListTunnels)
 	a.sysPerm("POST", "tunnel/stop", "tunnel:stop", a.handleStopTunnel)
 	a.sysPerm("POST", "webproxy/start", "webproxy:start", a.handleStartWebProxy)
+	a.sysPerm("GET", "webproxy/state", "webproxy:start", a.handleWebProxyState)
 	a.sysPerm("POST", "webproxy/stop", "webproxy:stop", a.handleStopWebProxy)
 
 	a.sysWSPerm("net/tcp", "net:tcp", a.serveTcpWS)

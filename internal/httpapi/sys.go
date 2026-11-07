@@ -20,7 +20,10 @@ import (
 // hostApp 是宿主桌面页面的内置保留身份标识符。
 const hostApp = "__host__"
 
-// maxSessions 限制单进程最大活跃会话数量上限。
+// maxSessions 是活跃刷新会话的条数上限：超出后按 last_use 淘汰最旧的会话。
+// 「活跃会话」在库里就是一条未吊销、未过期的刷新令牌记录——每次签发或一轮轮换各产生一条，
+// 轮换会把旧行置为吊销，因此未吊销行数就是活跃会话数。淘汰只影响刷新令牌，
+// 已签出的访问 JWT 仍按自身 exp 走完。
 const maxSessions = 256
 
 type sysAppKey struct{}
@@ -33,11 +36,6 @@ type sysEntry struct {
 
 	noBody bool
 	h      http.HandlerFunc
-}
-
-// sys 向网关注册一个标准 HTTP 端点。
-func (a *Gateway) sys(verb, target, perm string, h http.HandlerFunc) {
-	a.sysTable[verb+" "+target] = &sysEntry{perm: perm, h: h}
 }
 
 // sysPerm 向网关注册一个受细粒度权限控制的 HTTP 端点。
@@ -117,11 +115,15 @@ func (a *Gateway) sysDispatch(w http.ResponseWriter, r *http.Request) {
 		if e.perm != "" {
 			need := PermNormalize(e.perm)
 			allowed := a.tokenAllows(app, need, claims)
-			if !allowed && (need == "tunnel:start" || need == "tunnel:stop") && a.tokenAllows(app, "tunnel:local", claims) {
-				allowed = true
-			}
-			if !allowed && (need == "exec:run" || need == "exec:stream" || need == "exec:session") && a.tokenAllows(app, "local:exec", claims) {
-				allowed = true
+			if !allowed {
+				// 细粒度节点代偿：表项仍是粗粒度键（审计按它记账），
+				// 但持有一条更具体的 scope（如 tunnel:udp:local）也算放行。
+				for _, alt := range permSubstitutes(need) {
+					if a.tokenAllows(app, alt, claims) {
+						allowed = true
+						break
+					}
+				}
 			}
 			if !allowed {
 				denied := app
@@ -296,6 +298,31 @@ func (a *Gateway) permAllowed(appID, perm string) bool {
 	return a.store.HasGrant(appID, perm)
 }
 
+// permSubstitutes 列出可代偿某个表项权限的细粒度 scope。
+// 表项键只决定审计标签，实际授权可以是这些具体节点中的任意一个。
+func permSubstitutes(perm string) []string {
+	switch perm {
+	case "tunnel:start":
+		return []string{"tunnel:local", "tunnel:tun", "tunnel:tcp:local", "tunnel:tcp:remote", "tunnel:tcp:socks", "tunnel:udp:local", "tunnel:udp:socks"}
+	case "tunnel:stop":
+		return []string{"tunnel:local", "tunnel:tun", "tunnel:tun:stop", "tunnel:tcp:stop", "tunnel:udp:stop"}
+	case "exec:run", "exec:stream", "exec:session":
+		return []string{"local:exec"}
+	}
+	return nil
+}
+
+// permAllowedAny 判定 appID 是否持有 needs 中的任意一条权限。
+// 用于协议敏感的入口：TCP 与 UDP 各有独立节点，命中一个即可。
+func (a *Gateway) permAllowedAny(appID string, needs ...string) bool {
+	for _, p := range needs {
+		if a.permAllowed(appID, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func execPermNeed(host string) string {
 	if host == "" {
 		return "local:exec"
@@ -372,7 +399,7 @@ func (a *Gateway) handlePermGrants(w http.ResponseWriter, r *http.Request) {
 }
 
 type permManageReq struct {
-	App   string   `json:"app"`
+	App       string   `json:"app"`
 	Perms     []string `json:"perms"`
 	ExpiresAt int64    `json:"expiresAt,omitempty"`
 

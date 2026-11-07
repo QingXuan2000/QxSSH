@@ -160,6 +160,11 @@ export function stopWebProxy(id) {
   return sysCall('webproxy/stop', { id });
 }
 
+/** 查询 Web 代理实例最近一次文档请求的轨迹（路径、查询串、状态码、错误、命中数） */
+export function webProxyState(id) {
+  return sysGet('webproxy/state', { id });
+}
+
 /** 拼装 TCP 转发通道的 WebSocket 地址 */
 export function tcpBridgeWSUrl(hostId, addr, port) {
   return sysWsUrl('net/tcp', dquery(hostId, { addr, port }));

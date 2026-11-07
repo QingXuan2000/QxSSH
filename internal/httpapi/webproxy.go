@@ -32,6 +32,21 @@ func (a *Gateway) handleStartWebProxy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, inst)
 }
 
+// handleWebProxyState 返回代理实例最近一次文档请求的轨迹，供内嵌浏览器还原地址栏与导航状态。
+func (a *Gateway) handleWebProxyState(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("id is required"))
+		return
+	}
+	st, err := a.proxies.State(id)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, st)
+}
+
 func (a *Gateway) handleStopWebProxy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`

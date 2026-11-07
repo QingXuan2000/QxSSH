@@ -651,6 +651,8 @@ func (a *Gateway) issueAppSession(app string, extraScopes ...string) (*appSessio
 	}); err != nil {
 		return nil, err
 	}
+	// 签发即计数：把活跃刷新会话收在 maxSessions 条以内，超出部分淘汰最久未使用的。
+	a.trimSessions(now.Unix())
 	return sess, nil
 }
 
@@ -775,6 +777,20 @@ func (a *Gateway) handleSessionMint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, sess.mintResp())
 }
 
+// trimSessions 把活跃刷新会话收在 maxSessions 条以内。
+//
+// 失败只记日志：会话已经签出来了，一次清理失败不能把令牌吞掉。
+func (a *Gateway) trimSessions(now int64) {
+	n, err := a.store.TrimRefresh(maxSessions, now)
+	if err != nil {
+		a.log.Warn("trim refresh tokens failed", "error", err.Error())
+		return
+	}
+	if n > 0 {
+		a.log.Info("trimmed refresh tokens", "count", n, "keep", maxSessions)
+	}
+}
+
 // handleSessionRefresh 轮换刷新令牌并换发访问令牌（§7.5）。
 //
 // 重复使用「已经轮换掉」的旧刷新令牌是明确的泄露信号：
@@ -839,6 +855,8 @@ func (a *Gateway) handleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	// 轮换也计数：一轮轮换就是一次「旧会话死、新会话生」，与新签发同口径。
+	a.trimSessions(now)
 	a.audit.record(auditEntry{
 		AppID:  row.AppID,
 		HostID: permReqHost(req.Host),

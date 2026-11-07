@@ -34,7 +34,6 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 0.72rem;
 }
-.brw-view { flex: 1; min-height: 0; position: relative; background: var(--muted); }
 .brw-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--background); }
 .brw-hint {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -64,14 +63,38 @@
 }
 
 .brw-prog-wrap { display: flex; flex-direction: column; }
-.brw-side-prog {
-  width: 100%;
-  font-size: 0.78rem;
-  margin-bottom: 12px;
+/* 浏览器下拉：自绘按钮，永远可点（原生 select 在异步装载列表时容易卡在 disabled 状态） */
+.brw-prog-btn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; height: 32px; padding: 0 10px; margin-bottom: 12px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--card); color: var(--foreground);
+  font-family: var(--font-sans); font-size: 0.78rem; text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.brw-prog-btn:hover { border-color: var(--ring); }
+.brw-prog-btn:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 3px var(--ring-halo); }
+.brw-prog-btn.is-empty { color: var(--muted-foreground); }
+.brw-prog-ic { flex: none; display: inline-flex; color: var(--muted-foreground); }
+.brw-prog-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brw-prog-caret {
+  flex: none; width: 0; height: 0;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid var(--muted-foreground);
 }
 .brw-err {
   font-size: 0.72rem; line-height: 1.4;
   color: var(--destructive);
   margin: -6px 0 12px;
   overflow-wrap: anywhere;
+}
+
+/* 三点「更多选项」按钮：位于工具栏后退按钮左侧，开启 UDP 转发时右上角带一个小圆点 */
+.brw-more-btn { position: relative; }
+.brw-more-btn.on { color: var(--primary); }
+.brw-more-btn.on::after {
+  content: ''; position: absolute; top: 5px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--primary);
 }

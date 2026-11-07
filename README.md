@@ -40,7 +40,7 @@ QxSSH 是一个用 Go 编写的单二进制自托管 Web 应用。它把一台�
 - [HTTP 与 WebSocket API 参考](#http-与-websocket-api-参考)
   - [API 设计与调用约定](#api-设计与调用约定)
   - [全量端点清单](#全量端点清单)
-  - [15 大权限分组与 88 项细粒度 Scope](#15-大权限分组与-88-项细粒度-scope)
+  - [15 大权限分组与 95 项细粒度 Scope](#15-大权限分组与-95-项细粒度-scope)
 - [数据与配置目录](#数据与配置目录)
 - [开发与构建](#开发与构建)
 - [Git 忽略与构建产物说明](#git-忽略与构建产物说明)
@@ -58,8 +58,10 @@ QxSSH 是一个用 Go 编写的单二进制自托管 Web 应用。它把一台�
 - **Web 终端**：基于 WebSocket 与 xterm.js，支持多标签页、窗口分屏、字体自适应、会话断线重连与终端状态保持。
 - **全方位命令执行**：支持远端一次性执行、流式输出、宿主机本地命令执行，以及无需长连接保持的脱机后台长作业（启动、状态查询、输出拉取、终止与清理）。
 - **SFTP 文件管理**：远程目录浏览、文件上传 / 下载、复制、移动、重命名、权限属主修改，以及目录即时打包归档下载。
-- **网络隧道体系**：支持本地端口转发（local）、远程端口转发（remote）与动态 SOCKS5 代理（dynamic）。
+- **网络隧道体系**：支持本地端口转发（local）、远程端口转发（remote）、动态 SOCKS5 代理（dynamic，可选 UDP ASSOCIATE）、UDP 数据报转发（proto=udp）与三层 TUN 隧道（type=tun，整条 IP 层走 SSH）。
 - **内嵌 Web 代理**：通过 SSH 隧道将远端内网 Web 页面反向代理至本地 `127.0.0.1`，自动改写跨域响应头、重定向 URL 与 Cookie，无需配置浏览器代理即可直连内网面板。
+
+  内置浏览器提供「内嵌窗口」模式：同目标代理实例复用、按路径打开（不是只代理根路径）、启动时先在服务端走完 HTTP→HTTPS 升级链（`https` 上游直接命中，不必让浏览器串多轮重定向）、后退/前进走独立历史栈、按 `webproxy/state` 回读代理侧真实路径与状态码来同步地址栏与加载状态。
 - **sudo 会话提权**：按主机申请管理员权限，密码仅在内存中缓存（默认 30 分钟），支持主动遗忘清空。
 - **定时任务引擎**：内置 cron 表达式调度器，支持在指定主机上定期执行自动化命令。
 - **深度审计留痕**：详细记录每一次 API 调用的发起应用、目标主机、接口方法、耗时与结果；详细模式下请求头与请求体采用 AES-256-GCM 加密落盘，支持按工作区轮转、脱敏归档打包与保留期淘汰。
@@ -142,9 +144,9 @@ QxSSH 具备执行任意系统命令、管理远程文件与操作敏感凭据�
 2. **全局访问令牌与常量时间比较**：
    启用鉴权令牌后，所有外部 HTTP / WebSocket 请求必须携带 `Authorization: Bearer <token>`、URL 参数 `?token=` 或 `qx_token` Cookie。服务端使用 `crypto/subtle.ConstantTimeCompare` 进行防时序攻击比较；使用 `?token=` 初次登录成功后，会自动写入 `HttpOnly`、`SameSite=Strict` 的安全 Cookie。
 3. **宿主与应用双层会话隔离**：
-   宿主界面（`index.html` 与 `desktop.html`）在服务端渲染时通过 `crypto/rand` 随机生成并注入一次性宿主令牌（Host Token）。第三方应用运行于 `iframe` 沙箱中，无法接触宿主令牌；应用必须由宿主通过 `POST /api/v1/session/mint` 端点为其铸造独立的会话访问令牌（Access Token），该令牌绑定应用身份并签名受限 Scope。
+   宿主界面（`index.html` 与 `desktop.html`）在服务端渲染时通过 `crypto/rand` 随机生成并注入一次性宿主令牌（Host Token）。第三方应用运行于 `iframe` 沙箱中，无法接触宿主令牌；应用必须由宿主通过 `POST /api/v1/session/mint` 端点为其铸造独立的会话访问令牌（Access Token），该令牌绑定应用身份并签名受限 Scope。活跃刷新会话上限 256 条（`app_refresh` 中未吊销未过期的行），每次签发与轮换都会按 `last_use` 淘汰最旧的超额会话，避免刷新令牌表无界增长；被淘汰后旧访问令牌仍按自身 `exp` 走完，不会掐断正在进行的请求。
 4. **零默认权限原则（Zero Default Permissions）**：
-   系统定义了 15 个分组共 88 项细粒度权限（Scope）。所有权限项默认均为 `false`（无放行权限）。第三方应用访问私有存储、读写机密或调用任何系统 API，都必须在 `manifest.json` 中明确声明，并在安装或运行时获得用户显式授权。宿主与内置系统应用拥有全量权限。
+   系统定义了 15 个分组共 95 项细粒度权限（Scope）。所有权限项默认均为 `false`（无放行权限）。第三方应用访问私有存储、读写机密或调用任何系统 API，都必须在 `manifest.json` 中明确声明，并在安装或运行时获得用户显式授权。宿主与内置系统应用拥有全量权限。
 5. **凭据静态加密（AES-256-GCM）**：
    所有远程主机密码、私钥内容、私钥密码短语以及应用私有机密，在 SQLite 数据库中均通过 AES-256-GCM 算法加密存储。主密钥在首次运行时由加密安全随机数生成并存入数据库 `meta` 表中。
 6. **首次信任主机公钥校验（TOFU 机制）**：
@@ -221,7 +223,9 @@ QxSSH/
 - **端口转发**：
   - 本地转发（Local）：将本地指定端口流量通过 SSH 隧道转发至远端目标地址。
   - 远程转发（Remote）：在远端主机上监听端口并将流量导回本地或指定目标。
-  - 动态转发（Dynamic SOCKS5）：在本地回环地址启动标准 SOCKS5 代理服务，流量通过远端主机出网，支持 IPv4、IPv6 与域名寻址。
+  - 动态转发（Dynamic SOCKS5）：在本地回环地址启动标准 SOCKS5 代理服务，流量通过远端主机出网，支持 IPv4、IPv6 与域名寻址；开启 UDP 后同一端口额外接受 SOCKS5 UDP ASSOCIATE。
+  - UDP 转发（proto=udp）：因为 sshd 不监听 UDP，数据报按 `[2 字节大端长度][载荷]` 帧化后装进 SSH `direct-tcpip` 通道，由远端临时目录里的 Python 中继拆帧并转成真实 UDP 发出，回包按连接原路返回。
+  - TUN 隧道（type=tun）：向远端 sshd 申请 `tun@openssh.com` 通道，本机建同名虚拟网卡，两端配对成点对点链路，IP 层直接走 SSH。远端需要 `PermitTunnel point-to-point`（缺省 no）且会话有 root 才能打开 `/dev/net/tun`；本机侧 Linux 直接开 `/dev/net/tun`，Windows 需要 `wintun.dll`（可用 `QXSSH_WINTUN_DLL` 指定路径），macOS 用系统自带的 `utun`（需 root，不装驱动）。
 - **内网 Web 代理（Web Reverse Proxy）**：
   - 自动在本地回环地址分配随机端口，通过 SSH 隧道与远端内网 HTTP / HTTPS 服务建立反向代理桥。
   - 智能改写 HTTP 报文中的跨域头、重定向 Location 以及 Set-Cookie 域，使用户在本地浏览器即可无缝访问远端受保护内网中的各类 Web 控制台。
@@ -523,7 +527,7 @@ zip -r ../my-app.qxp . -x "*.git*"
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/sudo/request` | `sudo:request` | 申请目标主机的内存 Sudo 提权会话 |
 | `POST` | `/api/v1/sudo/forget` | `sudo:forget` | 立即清除内存中的 Sudo 凭据缓存 |
-| `POST` | `/api/v1/tunnel/start` | `tunnel:start` | 启动本地转发、远程转发或 SOCKS5 代理通道 |
+| `POST` | `/api/v1/tunnel/start` | `tunnel:start`（可代偿 `tunnel:tcp:local` / `tunnel:tcp:remote` / `tunnel:tcp:socks` / `tunnel:udp:local` / `tunnel:udp:socks` / `tunnel:tun`） | 启动本地转发、远程转发、SOCKS5 代理（`udp=true` 时附带 UDP ASSOCIATE）、UDP 转发（`proto=udp`）或 TUN 隧道（`type=tun`） |
 | `GET` | `/api/v1/tunnel/list` | `tunnel:list` | 查询当前运行中的所有隧道与代理状态 |
 | `POST` | `/api/v1/tunnel/stop` | `tunnel:stop` | 停止指定的端口转发通道 |
 | `POST` | `/api/v1/webproxy/start` | `webproxy:start` | 启动通往远端内网 Web 服务的反向代理 |
@@ -542,7 +546,7 @@ zip -r ../my-app.qxp . -x "*.git*"
 | `POST` | `/api/v1/apps/link` | `apps:link` | 软链接本地开发目录为实时应用 |
 | `POST` | `/api/v1/apps/enabled` | `apps:toggle` | 切换指定应用的启用 / 禁用状态 |
 | `GET` | `/api/v1/apps/file/{id}/{path...}` | 公开 | 获取已安装应用包内的静态资产文件（如图标） |
-| `GET` | `/api/v1/perm/catalog` | 公开 | 获取系统全量 88 项细粒度权限规范目录 |
+| `GET` | `/api/v1/perm/catalog` | 公开 | 获取系统全量 95 项细粒度权限规范目录 |
 | `GET` | `/api/v1/perm/granted` | `perm:granted` | 查询当前应用自身已获得的权限列表 |
 | `GET` | `/api/v1/perm/grants` | `perm:read` | 查询所有已注册应用的权限分配详情 |
 | `POST` | `/api/v1/perm/grant` | `perm:grant` | 批量向指定应用授予权限节点 |
@@ -593,7 +597,7 @@ zip -r ../my-app.qxp . -x "*.git*"
 
 ---
 
-### 15 大权限分组与 88 项细粒度 Scope
+### 15 大权限分组与 95 项细粒度 Scope
 
 系统权限体系按照最小权限原则划分为 15 个功能分组，每个权限节点（Scope）具备独立的危险级别定义（1-低危、2-中危、3-高危）：
 
@@ -606,7 +610,7 @@ zip -r ../my-app.qxp . -x "*.git*"
 7. **`schedule`（定时调度）**：`schedule:list`、`schedule:create`、`schedule:update`、`schedule:delete`、`schedule:run`
 8. **`files`（远端 SFTP 文件）**：`server:stat`、`server:read`、`server:download`、`server:upload`、`server:mkdir`、`server:rename`、`server:copy`、`server:move`、`server:delete`、`server:attrs`
 9. **`local`（宿主机本地文件与进程）**：`local:list`、`local:read`、`local:write`、`local:delete`、`local:mkdir`、`local:rename`、`local:exec`
-10. **`network`（网络隧道与代理）**：`tunnel:start`、`tunnel:list`、`tunnel:stop`、`webproxy:start`、`webproxy:stop`、`net:tcp`、`net:http`
+10. **`network`（网络隧道与代理）**：`tunnel:list`、`tunnel:start`、`tunnel:stop`、`tunnel:local`、`tunnel:tcp:local`、`tunnel:tcp:remote`、`tunnel:tcp:socks`、`tunnel:udp:local`、`tunnel:udp:socks`、`tunnel:tcp:stop`、`tunnel:udp:stop`、`tunnel:tun`、`tunnel:tun:stop`、`webproxy:start`、`webproxy:stop`、`net:tcp`、`net:http`
 11. **`host`（主机与凭据管理）**：`hosts:read`、`hosts:create`、`hosts:update`、`hosts:delete`、`hosts:import`、`hosts:test`、`hosts:preconnect`、`hosts:probe`、`hosts:forgetos`、`hosts:credential`
 12. **`apps`（应用插件管理）**：`apps:list`、`apps:validate`、`apps:install`、`apps:uninstall`、`apps:link`、`apps:toggle`
 13. **`elev`（提权与授权治理）**：`sudo:request`、`sudo:forget`、`perm:read`、`perm:grant`、`perm:revoke`、`perm:clear`、`perm:manage`

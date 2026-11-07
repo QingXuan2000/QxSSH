@@ -13,9 +13,9 @@
   "keywords": ["tunnel", "port", "forward", "duankou"],
   "entry": "index.html",
   "preferredSize": { "width": 830, "height": 560, "minWidth": 830, "minHeight": 320 },
-  "permissions": ["tunnel:local", "tunnel:start", "tunnel:stop", "tunnel:list", "hosts:read"],
+  "permissions": ["tunnel:local", "tunnel:tcp:local", "tunnel:tcp:remote", "tunnel:tcp:socks", "tunnel:udp:local", "tunnel:udp:socks", "tunnel:start", "tunnel:stop", "tunnel:tcp:stop", "tunnel:udp:stop", "tunnel:list", "hosts:read"],
   "apis": [
-    { "name": "create", "description": "Start a tunnel: { hostId?, type: 'local'|'remote'|'dynamic', bind?, port, target? } -> registry entry (port 0 = pick a free one)", "version": "2", "launch": "background", "perm": "tunnel:local" },
+    { "name": "create", "description": "Start a tunnel: { hostId?, type: 'local'|'remote'|'dynamic'|'udp', bind?, port, target? } -> registry entry (port 0 = pick a free one; udp ships a relay to the remote temp dir and forwards datagrams over SSH)", "version": "3", "launch": "background", "perm": "tunnel:local" },
     { "name": "stop", "description": "Stop a tunnel by id: { id }", "version": "1", "launch": "background", "perm": "tunnel:local" },
     { "name": "list", "description": "List tunnels of the current workspace (no args)", "version": "1", "launch": "background", "perm": "tunnel:list" },
     { "name": "whereami", "description": "Current workspace of the tunnels window (no args)", "version": "1" }

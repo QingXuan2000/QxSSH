@@ -510,5 +510,3 @@ func (a *Gateway) handleAuditNote(w http.ResponseWriter, r *http.Request) {
 	})
 	writeJSON(w, okResp{OK: true})
 }
-
-
