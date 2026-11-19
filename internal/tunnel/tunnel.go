@@ -189,12 +189,13 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		return m.startUDP(req)
 	}
 
-	if req.Type == "local" || req.Type == "dynamic" {
-		if !loopbackOnly[req.Bind] {
-			return nil, fmt.Errorf(
-				"监听地址只允许 127.0.0.1 / ::1（收到 %q）：开在 0.0.0.0 上会让同网段"+
-					"任何机器都连进来借道访问被控机内网，而转发没有认证", req.Bind)
-		}
+	// 三类转发的监听地址一律默认仅回环（QX-017）：remote 开在 0.0.0.0 上
+	// 会把宿主侧服务（含免鉴权网关）暴露给远端网段任何机器，而转发没有认证。
+	// 确需对外暴露时由用户在远端自行做带鉴权的反向代理，而不是裸转发。
+	if !loopbackOnly[req.Bind] {
+		return nil, fmt.Errorf(
+			"监听地址只允许 127.0.0.1 / ::1（收到 %q）：开在 0.0.0.0 上会让同网段"+
+				"任何机器都连进来借道访问内网，而转发没有认证", req.Bind)
 	}
 	if req.Type != "dynamic" {
 		if req.Target == "" {
