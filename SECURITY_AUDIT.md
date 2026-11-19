@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 6 轮，P0 全部完成，P1 大部完成）
+### 已修复（截至 2026-11-19 第 7 轮，累计 50 项）
 
 **第 1 轮**
 
@@ -526,6 +526,17 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-037（Medium） | SFTP 上传请求体 MaxBytesReader + 远端写入 LimitReader 双硬限（512MB）；超限删除远端半成品 | 4af6de2 |
 | QX-038（Medium） | copy/move 拒绝自嵌套目标；copyPath 深度上限 64（符号链接环）；removeRecursive 改 Lstat（删链接本身不删目标内容） | 4af6de2 |
 
+**第 7 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-034（Medium） | 三类 WS（终端/远端执行/本机执行）统一 wsKeepalive：读限期+pong 重置+周期 ping；wsWriter 写超时；半开连接 60s 内释放 wsSlots。交互式会话不设绝对时限（死端检测已解决名额耗尽） | 0b791e7 |
+| QX-029（Medium） | RotateRefresh 条件原子更新（revoked=0 + RowsAffected）返回 ErrRefreshReused；处理层据此整体撤销——并发重用绕过预检的竞态关闭 | 0b791e7 |
+| QX-031（Medium） | WS 会话审计 Detail 记录脱敏后的查询串（exec/session 的 argv、term 的 host/cwd），Duration=会话时长 | c7599f7 |
+| QX-032（Medium） | peekHostID 以 JSON body 的 host 字段为准；body 解析后无 host 不再回退可伪造的 query | c7599f7 |
+| QX-039（Medium） | 系统审计独立文件 curDir/system.jsonl（不属于任何工作组，组级清空/归档/轮转不可触及，单代轮转）；logs/clear、archive、settings、verbose 四类管理操作记录调用者+参数 | faee416 |
+| QX-040（Medium） | logs 应用 storage 命名空间的 audit/archlive 子树设为系统保留区（storePath 单一 chokepoint 覆盖全部操作含 rename 两端）；根列表隐藏保留目录 | faee416 |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -536,7 +547,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 ### 待修复（后续轮次）
 
 - High 仅剩：QX-004（主密钥移出 data.db / OS 密钥链 / 口令派生——需独立设计轮）
-- P1 其余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-029（refresh 轮换原子性）、QX-031/032（审计缺口/归属）、QX-033（sudo 回显）、QX-034（WS 超时）、QX-039/040（审计反取证）、QX-044/045/048/049（前端沙箱/渲染/SDK）
+- Medium 剩余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-033（sudo 回显）、QX-044/045/048/049（前端沙箱/渲染/SDK）
 - P2：其余 Low/Info 逐项（QX-016 残留等）
 
 ---
