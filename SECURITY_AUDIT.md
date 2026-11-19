@@ -4,10 +4,9 @@
 
 - **审计日期**：2026-11-19
 - **审计对象**：QxSSH（自托管 SSH 管理控制台），Go 后端约 16,900 行 + 前端 JS/HTML 约 30,000 行（不含 vendor）
-- **审计方式**：白盒静态审计。6 个并行专项（认证与会话 / 凭据与加密存储 / 命令执行与终端 / 文件与网络转发 / 应用商店与审计日志 / 前端与沙箱桥接）全文通读范围内源码，跨文件求证；汇总人对全部 Critical/High 级关键发现逐条复核代码证据。未运行 `qxssh.exe`，未做动态 PoC 验证，未修改任何源码。
+- **审计方式**：白盒静态审计。6 个并行专项（认证与会话 / 凭据与加密存储 / 命令执行与终端 / 文件与网络转发 / 应用商店与审计日志 / 前端与沙箱桥接）全文通读范围内源码，跨文件求证；汇总人对全部 Critical/High 级关键发现逐条复核代码证据。审计阶段未运行 `qxssh.exe`、未做动态 PoC 验证（修复阶段的改动见 security-fixes 分支提交）。
 - **辅助检查**：`go vet ./...` 通过（0 告警）；依赖版本核对（见 QX-079）；仓库卫生检查（无二进制入库、文档/示例无真实凭据）。
-- **专项明细报告**（含完整代码证据、攻击链推导、修复建议、"已检查无问题"清单）：
-  [findings-auth.md](<audit-work/findings-auth.md>) · [findings-creds.md](<audit-work/findings-creds.md>) · [findings-exec.md](<audit-work/findings-exec.md>) · [findings-net.md](<audit-work/findings-net.md>) · [findings-apps.md](<audit-work/findings-apps.md>) · [findings-frontend.md](<audit-work/findings-frontend.md>)
+- **专项明细底稿**：6 份修复前的专项快照（findings-auth/creds/exec/net/apps/frontend）已随修复完成删除，全部结论与证据已并入本报告；如需原始底稿可在 git 历史之外另行重建（底稿当时未入库）。
 
 ---
 
@@ -435,7 +434,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - **严重级别口径**：Critical=可闭环推导的完全接管/全量凭据泄露且前置条件低；High=完全接管但需特定前置（用户交互/特定浏览器/特定授权）或局部严重越权；Medium=有限越权/信息泄露/DoS/设计缺陷；Low=加固项；Info=注记。个别条目汇总定级与专项不同处已注明理由（QX-004）。
 - **去重规则**：同一缺陷被多专项独立发现的合并为一条并列出全部来源编号（如 QX-002=CRED-02=EXEC-03），交叉印证提高置信度。
 - **依赖扫描局限**：govulncheck 未安装未能运行；依赖版本经人工核对无已知 CVE 命中，但不排除未公开/新披露漏洞。
-- 各专项的完整证据摘录、逐条攻击链推导与"无问题"核查明细见 audit-work/ 下六份报告。
+- 各专项的完整证据摘录与逐条攻击链推导已并入本报告对应条目（原始底稿已删除）。
 
 ---
 
@@ -489,7 +488,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 | 发现 | 修复内容 | 提交 |
 |---|---|---|
-| **QX-019（High）** | 内置应用最小权限化三处同改：appScope 按 manifest 声明签发（不再全量 permIDs）；permAllowed 对内置应用按声明集判定；桥 requirePermission/api-call/跨应用分派取消 system  blanket 豁免改查 manifest。11 个 manifest 依据逐调用点盘点（audit-work/builtin-scopes.md）补齐缺失键（files 的 sudo、taskmon/systemd 的 local:exec、hosts 的 forgetos、browser/tunnels 的 preconnect、prefs:self 读写对等），移除 browser exec:run/local:read 与 hosts hosts:credential 三个危险冗余键 | 5f1e720 |
+| **QX-019（High）** | 内置应用最小权限化三处同改：appScope 按 manifest 声明签发（不再全量 permIDs）；permAllowed 对内置应用按声明集判定；桥 requirePermission/api-call/跨应用分派取消 system  blanket 豁免改查 manifest。11 个 manifest 依据逐调用点盘点补齐缺失键（files 的 sudo、taskmon/systemd 的 local:exec、hosts 的 forgetos、browser/tunnels 的 preconnect、prefs:self 读写对等），移除 browser exec:run/local:read 与 hosts hosts:credential 三个危险冗余键 | 5f1e720 |
 | **QX-010（High）** | 安装同意门禁：grantOnInstall 按 Danger 分级——≤1 随安装授予，≥2 仅授予用户确认页展示的 consent 清单内的项，其余延迟到运行时逐项弹窗请求并返回 deferredPermissions 提示；store 四条安装路径接线 consent；desktop 快捷安装无 consent → 高危自动延迟（安全默认）；审计记录 granted/deferred | 4965c15 |
 | 注释修正 | handleInstallApp 文档不再称"声明即预授权"；appScope 注释同步 | 4965c15/5f1e720 |
 
@@ -652,7 +651,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - `go test ./...` ✅（config 包 2 个主密钥功能测试全过）
 - `govulncheck ./...` ✅ **0 个影响代码的漏洞**
 - 全部 11 个修改过的前端 JS 文件 `node --check` ✅
-- 工作树干净（仅 audit-work/ 工作底稿未跟踪）
+- 工作树干净（过时审计底稿 audit-work/ 已删除）
 
 ### 目标完成总结
 
