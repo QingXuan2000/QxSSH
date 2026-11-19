@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/crypto/argon2"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -219,20 +221,140 @@ func ensureSchemaVersion(db *sql.DB) error {
 	return metaSet(db, metaSchemaVer, []byte(fmt.Sprintf("%d", schemaVersion)))
 }
 
-// resolveMasterKey 读取数据库中的主密钥；不存在时随机生成 32 字节并持久化。
-// 主密钥用于加密主机凭据与应用机密。
-func resolveMasterKey(db *sql.DB) ([]byte, error) {
-	if raw, ok, err := metaGet(db, metaMasterKey); err != nil {
-		return nil, err
-	} else if ok && len(raw) == 32 {
+// resolveMasterKey 从独立密钥文件加载主密钥（QX-004）：
+//   - 密钥存 configDir/master.key（0600），与 data.db 分离——单独泄露/备份
+//     数据库文件不再等于全量凭据泄露；
+//   - 设置 QXSSH_MASTER_PASSPHRASE 时密钥文件为 Argon2id KEK 包裹的密文，
+//     口令错误拒绝启动（fail-closed）；对已有裸密钥文件自动升级包裹；
+//   - 迁移：旧版 meta.master_key 明文行存在且密钥文件缺失时，写出密钥文件
+//     并删除 meta 行。
+func resolveMasterKey(db *sql.DB, path string) ([]byte, error) {
+	dir := filepath.Dir(path)
+	keyPath := filepath.Join(dir, masterKeyFile)
+	pass := os.Getenv(masterPassEnv)
+
+	raw, err := os.ReadFile(keyPath)
+	switch {
+	case err == nil:
+		if len(raw) >= len(masterWrapMagic) && string(raw[:len(masterWrapMagic)]) == masterWrapMagic {
+			if pass == "" {
+				return nil, fmt.Errorf("主密钥受口令保护：请设置环境变量 %s", masterPassEnv)
+			}
+			return unwrapMasterKey(raw, pass)
+		}
+		if len(raw) != 32 {
+			return nil, fmt.Errorf("主密钥文件 %s 长度异常（%d 字节）", keyPath, len(raw))
+		}
+		if pass != "" {
+			// 升级保护：把已有的裸密钥文件用口令包裹。
+			if err := writeMasterKeyFile(keyPath, raw, pass); err != nil {
+				return nil, err
+			}
+		}
 		return raw, nil
+	case errors.Is(err, os.ErrNotExist):
+		// 继续走迁移/生成。
+	default:
+		return nil, err
 	}
+
+	// 旧版库内明文密钥迁移（QX-004）。
+	if old, ok, err := metaGet(db, metaMasterKey); err != nil {
+		return nil, err
+	} else if ok && len(old) == 32 {
+		if err := writeMasterKeyFile(keyPath, old, pass); err != nil {
+			return nil, err
+		}
+		if _, err := db.Exec(`DELETE FROM meta WHERE key = ?`, metaMasterKey); err != nil {
+			return nil, fmt.Errorf("清理旧库内主密钥失败: %w", err)
+		}
+		return old, nil
+	}
+
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	if err := metaSet(db, metaMasterKey, key); err != nil {
+	if err := writeMasterKeyFile(keyPath, key, pass); err != nil {
 		return nil, err
+	}
+	return key, nil
+}
+
+const (
+	masterKeyFile   = "master.key"
+	masterWrapMagic = "QXMK1"
+	masterPassEnv   = "QXSSH_MASTER_PASSPHRASE"
+)
+
+func writeMasterKeyFile(keyPath string, key []byte, pass string) error {
+	blob := key
+	if pass != "" {
+		wrapped, err := wrapMasterKey(key, pass)
+		if err != nil {
+			return err
+		}
+		blob = wrapped
+	}
+	tmp := keyPath + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, keyPath)
+}
+
+// wrapMasterKey 用 Argon2id 派生的 KEK 包裹主密钥：
+// 格式 = "QXMK1" + salt(16) + nonce(12) + AES-256-GCM 密文。
+func wrapMasterKey(key []byte, pass string) ([]byte, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	kek := argon2.IDKey([]byte(pass), salt, 3, 64*1024, 4, 32)
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	ct := gcm.Seal(nil, nonce, key, nil)
+	out := make([]byte, 0, len(masterWrapMagic)+len(salt)+len(nonce)+len(ct))
+	out = append(out, masterWrapMagic...)
+	out = append(out, salt...)
+	out = append(out, nonce...)
+	out = append(out, ct...)
+	return out, nil
+}
+
+func unwrapMasterKey(blob []byte, pass string) ([]byte, error) {
+	rest := blob[len(masterWrapMagic):]
+	if len(rest) < 16+12+32 {
+		return nil, errors.New("主密钥包裹文件损坏")
+	}
+	salt := rest[:16]
+	nonce := rest[16:28]
+	ct := rest[28:]
+	kek := argon2.IDKey([]byte(pass), salt, 3, 64*1024, 4, 32)
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	key, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return nil, errors.New("主密钥口令错误或密钥文件损坏")
+	}
+	if len(key) != 32 {
+		return nil, errors.New("解出的主密钥长度异常")
 	}
 	return key, nil
 }

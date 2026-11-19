@@ -106,7 +106,7 @@ func Load(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	key, err := resolveMasterKey(db)
+	key, err := resolveMasterKey(db, dbPath(dir))
 	if err != nil {
 		db.Close()
 		return nil, err
