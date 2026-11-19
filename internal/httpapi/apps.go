@@ -392,24 +392,39 @@ func readAppUpload(r *http.Request) ([]byte, int, error) {
 }
 
 // downloadAppZip 从远程地址拉取应用包字节，返回值同 readAppUpload。
-// 地址未写协议时补 https://；先做语法校验（解析失败、主机为空、主机含空白或
-// 方括号花括号一律 400），再发请求——这类畸形地址基本是调用方把对象当字符串发了。
+// 仅允许 https（明文 http 存在供应链 MITM 风险，QX-014）；地址未写协议时补
+// https://；先做语法校验（解析失败、主机为空、主机含空白或方括号花括号一律
+// 400），再发请求。重定向最多 5 跳且目标必须仍为 https。
 // 下载整体 30 秒超时，读入上限 maxAppDownloadBytes。
 func downloadAppZip(rawURL string) ([]byte, int, error) {
 	if rawURL == "" {
 		return nil, http.StatusBadRequest, errors.New("url 为必填项")
 	}
 	u := rawURL
-	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+	if strings.HasPrefix(u, "http://") {
+		return nil, http.StatusBadRequest, errors.New("应用包下载仅允许 https（明文 http 有供应链劫持风险）")
+	}
+	if !strings.HasPrefix(u, "https://") {
 		u = "https://" + u
 	}
 	// 先做一次语法校验：空白、方括号、花括号出现在主机名里基本都是调用方把对象当字符串发了
 	// （例如 JS 的 String({}) → "[object Object]"），在这里拦下比等 http.Get 报错更好定位。
 	parsed, perr := url.Parse(u)
 	if perr != nil || parsed.Host == "" || strings.ContainsAny(parsed.Host, " \t\r\n\x00[]{}") {
-		return nil, http.StatusBadRequest, fmt.Errorf("下载地址无效：%q 不是有效的 http(s) 链接", rawURL)
+		return nil, http.StatusBadRequest, fmt.Errorf("下载地址无效：%q 不是有效的 https 链接", rawURL)
 	}
-	cl := &http.Client{Timeout: 30 * time.Second}
+	cl := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("重定向次数过多（上限 5）")
+			}
+			if req.URL.Scheme != "https" {
+				return errors.New("重定向目标非 https，已拒绝")
+			}
+			return nil
+		},
+	}
 	resp, err := cl.Get(u)
 	if err != nil {
 		return nil, http.StatusBadGateway, fmt.Errorf("下载失败: %w", err)

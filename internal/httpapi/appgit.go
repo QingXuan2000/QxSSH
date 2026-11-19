@@ -74,6 +74,8 @@ func isGitURL(u string) bool {
 // cleanGitURL 校验并规范化仓库地址，产出 go-git 可直接使用的形式：
 // 缺协议的 host/owner/repo 补 https://，scp 形式 git@host:path 转 ssh://git@host/path。
 // 拒绝空值、以连字符开头的值与无法识别的形态，避免地址被当成命令参数注入。
+// 协议白名单仅 https 与 ssh（git@/ssh://）：http/git:// 明文可被供应链 MITM，
+// file:// 可读取宿主本地仓库，一律禁用（QX-042）。
 func cleanGitURL(raw string) (string, error) {
 	u := strings.TrimSpace(raw)
 	if u == "" {
@@ -83,16 +85,13 @@ func cleanGitURL(raw string) (string, error) {
 		return "", errors.New("非法 Git 仓库地址（不能以连字符开头）")
 	}
 	lower := strings.ToLower(u)
-	if !strings.HasPrefix(lower, "http://") &&
-		!strings.HasPrefix(lower, "https://") &&
+	if !strings.HasPrefix(lower, "https://") &&
 		!strings.HasPrefix(lower, "git@") &&
-		!strings.HasPrefix(lower, "git://") &&
-		!strings.HasPrefix(lower, "ssh://") &&
-		!strings.HasPrefix(lower, "file://") {
+		!strings.HasPrefix(lower, "ssh://") {
 		if strings.Contains(u, "/") && !strings.Contains(u, "://") && !strings.HasPrefix(u, "\\") {
 			u = "https://" + u
 		} else {
-			return "", errors.New("Git 仓库地址格式不支持，请使用 http(s):// 或 git@ 开头的地址")
+			return "", errors.New("Git 仓库地址格式不支持：仅允许 https:// 或 git@/ssh:// 地址（http/git/file 协议已禁用）")
 		}
 	}
 	// scp 形式 git@host:path 转成 go-git 需要的 ssh://git@host/path
@@ -113,7 +112,10 @@ func cleanGitBranch(b string) (string, error) {
 	if strings.HasPrefix(b, "-") {
 		return "", errors.New("非法 Git 分支/标签名（不能以连字符开头）")
 	}
-	if strings.ContainsAny(b, " \t\r\n~^:?*[\x00-\x1f") {
+	// 控制字符按范围判断：ContainsAny 只认字面字符集，"\x00-\x1f" 写进去
+	// 会被当成三个普通字符而漏检（QX-070）。另补禁反斜杠。
+	if strings.ContainsAny(b, " \t\r\n~^:?*[\\") ||
+		strings.ContainsFunc(b, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return "", errors.New("Git 分支/标签名包含非法字符")
 	}
 	return b, nil
@@ -135,7 +137,7 @@ func cleanSubPath(p string) (string, error) {
 }
 
 // cloneOrGetCachedGitRepo 获取缓存的克隆目录，或执行浅克隆。纯 Go 实现，
-// 经 go-git 直接走 http(s)/git/ssh/file 传输，不依赖外部 git 命令。
+// 经 go-git 走 https/ssh 传输（协议白名单见 cleanGitURL），不依赖外部 git 命令。
 func cloneOrGetCachedGitRepo(ctx context.Context, rawURL, branch string) (string, string, error) {
 	cleanURL, err := cleanGitURL(rawURL)
 	if err != nil {
