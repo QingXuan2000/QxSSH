@@ -716,6 +716,49 @@ func (a *Gateway) revokeIDPJTI(jti string, exp int64) {
 	a.denyMu.Lock()
 	a.deny[jti] = exp
 	a.denyMu.Unlock()
+	a.saveDenyList()
+}
+
+// denyPath/loadDenyList/saveDenyList（QX-053）：jti 吊销名单持久化到配置目录，
+// 重启后单枚吊销不再失效。条目随令牌 exp（≤30 分钟）自然过期，文件恒小；
+// 加载时即清理过期项。写盘失败只告警：内存名单仍然生效。
+func (a *Gateway) denyPath() string { return filepath.Join(a.configDir, "idp-deny.json") }
+
+func (a *Gateway) loadDenyList(now int64) {
+	b, err := os.ReadFile(a.denyPath())
+	if err != nil {
+		return
+	}
+	var m map[string]int64
+	if json.Unmarshal(b, &m) != nil {
+		return
+	}
+	a.denyMu.Lock()
+	for jti, exp := range m {
+		if exp > now {
+			a.deny[jti] = exp
+		}
+	}
+	a.denyMu.Unlock()
+}
+
+func (a *Gateway) saveDenyList() {
+	a.denyMu.RLock()
+	m := make(map[string]int64, len(a.deny))
+	for k, v := range a.deny {
+		m[k] = v
+	}
+	a.denyMu.RUnlock()
+	b, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	tmp := a.denyPath() + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) != nil {
+		a.log.Warn("persist jti deny list failed", "error", err.Error())
+		return
+	}
+	_ = os.Rename(tmp, a.denyPath())
 }
 
 // pruneIDPDeny 清掉已过期的吊销项，避免名单无限增长。
@@ -827,6 +870,9 @@ func (a *Gateway) handleSessionMint(w http.ResponseWriter, r *http.Request) {
 		HostID: permReqHost(req.Host),
 		Type:   auditSessionMint,
 		Target: "session/mint",
+		// 本次允许的额外 scope 留痕（QX-055）：它们随刷新链续期，
+		// 授权表不可见，审计是唯一可追溯面。
+		Detail: strings.Join(req.ExtraScopes, ","),
 		Result: "ok",
 	})
 	writeJSONNoStore(w, sess.mintResp())

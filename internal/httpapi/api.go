@@ -102,6 +102,7 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.sysTable = map[string]*sysEntry{}
 	a.hostTok = randTok()
 	a.deny = map[string]int64{}
+	a.loadDenyList(time.Now().Unix())
 	a.sudoAttempts = map[string][]time.Time{}
 	a.bgProcs = map[string]*bgProc{}
 	a.jobOwn = map[string]string{}

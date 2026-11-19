@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -239,6 +240,14 @@ func (a *Gateway) handleNetHTTP(w http.ResponseWriter, r *http.Request) {
 	for k, v := range req.Headers {
 		if len(k) > netHTTPMaxHeaderLen || len(v) > netHTTPMaxHeaderLen {
 			writeErr(w, http.StatusBadRequest, errors.New("单个 header 过长"))
+			return
+		}
+		// 安全敏感与浏览器元数据头禁止经 net/http 转发（QX-062）：
+		// Sec-Fetch-* 可被伪造骗取宿主页令牌注入；凭据头不得发往任意目标。
+		lk := strings.ToLower(k)
+		if strings.HasPrefix(lk, "sec-fetch-") || strings.HasPrefix(lk, "sec-ch-") ||
+			lk == "x-qx-session" || lk == "authorization" || lk == "cookie" || lk == "proxy-authorization" {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("header %s 不允许经 net/http 转发", k))
 			return
 		}
 		if strings.EqualFold(k, "host") {
