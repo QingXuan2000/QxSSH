@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 8 轮，累计 54 项）
+### 已修复（截至 2026-11-19 第 9 轮，累计 65 项）
 
 **第 1 轮**
 
@@ -548,6 +548,22 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 **QX-049 归并注记**：tunnels.create 的 hostId 覆盖属 QX-026（授权无主机维度）的实例，随按主机授权设计一并解决。
 
+**第 9 轮（P2 批量加固）**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-050 | 后台执行 Info 日志只记 argv0+argc，不再全量 argv | 3c074c5 |
+| QX-051 | 凭据/机密/会话签发响应统一 Cache-Control: no-store | 3c074c5 |
+| QX-054 | 吊销访问 JWT 同步按 jti 吊销配套刷新令牌，堵换发复活 | 3c074c5 |
+| QX-061 | invalidateAppTokens 返回 error；perm/revoke、perm/clear 失败如实报错 | 3c074c5 |
+| QX-067 | bgProc 记录发起应用；exec/status、exec/kill 归属校验（宿主豁免） | 3c074c5 |
+| QX-069 | sudo 密码尝试每主机 5 次/60s 限速（探测不计入） | 3c074c5 |
+| QX-072 | browser-core resolveBare 改 POSIX 单引号转义 | f500a35 |
+| QX-073 | vdom on* 只接受函数，字符串值移除不落内联 handler | f500a35 |
+| QX-078 | 代理 XFF 反映真实客户端地址 | f500a35 |
+| QX-057 | CLI 传 token 时告警建议环境变量注入 | f500a35 |
+| QX-059 | apps/file 打开错误回通用 404，不泄露宿主路径 | f500a35 |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -555,11 +571,11 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - 语义层面的"空实现"：QX-074（encrypt/decrypt 失败静默返回空串）列入后续修复，以错误传播替代。
 - 本轮已删除被替代的死代码：`redactSessionInQuery`（功能并入 sanitizeAuditQuery）。
 
-### 待修复（后续轮次）
+### 待修复（后续轮次，剩余 15 项）
 
-- High 仅剩：QX-004（主密钥移出 data.db / OS 密钥链 / 口令派生——需独立设计轮）
-- Medium 剩余：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
-- P2：其余 Low/Info 逐项（QX-016 残留、QX-050/051/053-063/066-073 等）
+- High：QX-004（主密钥管理——独立设计轮）
+- Medium：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
+- Low/Info：QX-016 残留（代理能力路径/Cookie 隔离）、QX-053（jti 名单持久化）、QX-055（extraScopes 续期语义）、QX-056（CSP）、QX-058（令牌出 URL/限速）、QX-062（net/http 转发 Sec-Fetch 头）、QX-063（UDP/SOCKS 限额）、QX-066（PID 复用竞态）、QX-068（远端日志上限）、QX-071（init prefs 过滤）、QX-075/076/077/079/080（Info 注记类）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
