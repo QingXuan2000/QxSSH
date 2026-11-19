@@ -107,17 +107,22 @@ func (ks *idpKeys) publicKey(kid string) (*rsa.PublicKey, bool) {
 	return pub, ok
 }
 
-// rotate 生成新密钥并归档旧私钥；旧公钥保留在验签集合里。
-// 必须「先归档、再覆盖」：顺序反了会把还没留档的旧私钥直接冲掉。
+// rotate 生成新密钥并归档旧公钥；旧私钥由新密钥覆盖销毁，不再落盘保留。
+// 归档只留公钥：验签只需公钥，保留旧私钥会让读到归档目录的人都能伪造
+// 宿主全权令牌，且密钥轮换失去「泄露后止血」能力（QX-007）。
+// 必须「先归档、再覆盖」：顺序反了旧公钥就没留档。
 func (ks *idpKeys) rotate(dir string) error {
 	if ks.current != nil {
 		if err := os.MkdirAll(filepath.Join(dir, idpArchiveDir), 0o700); err != nil {
 			return fmt.Errorf("创建密钥归档目录失败: %w", err)
 		}
-		old := idpKeyPath(dir, idpPrivateFile)
-		arc := filepath.Join(dir, idpArchiveDir, "private-"+ks.current.kid+".pem")
-		if err := os.Rename(old, arc); err != nil {
-			return fmt.Errorf("归档旧签名私钥失败: %w", err)
+		pubDER, err := x509.MarshalPKIXPublicKey(&ks.current.key.PublicKey)
+		if err != nil {
+			return fmt.Errorf("编码旧签名公钥失败: %w", err)
+		}
+		arc := filepath.Join(dir, idpArchiveDir, "public-"+ks.current.kid+".pem")
+		if err := os.WriteFile(arc, pemEncode(idpPublicType, pubDER), 0o644); err != nil {
+			return fmt.Errorf("归档旧签名公钥失败: %w", err)
 		}
 	}
 
@@ -217,8 +222,8 @@ func loadIDPKeys(configDir string) (*idpKeys, error) {
 	}
 }
 
-// RotateIDPKeys 在配置目录里生成一把新的签名密钥并归档旧密钥，供命令行显式轮换。
-// 旧私钥保留在 archive/ 下只用于验签，不会被再次用于签名。
+// RotateIDPKeys 在配置目录里生成一把新的签名密钥并归档旧公钥，供命令行显式轮换。
+// 旧公钥保留在 archive/ 下只用于验签；旧私钥被新密钥覆盖销毁，不再保留。
 func RotateIDPKeys(configDir string) error {
 	dir := filepath.Join(configDir, idpKeyDir)
 	if err := os.MkdirAll(filepath.Join(dir, idpArchiveDir), 0o700); err != nil {
@@ -263,7 +268,9 @@ func loadIDPKey(dir, kid string) (*idpKey, error) {
 	return &idpKey{kid: kid, key: key}, nil
 }
 
-// loadArchivedPublicKeys 读出已轮换的历史公钥。
+// loadArchivedPublicKeys 读出已轮换的历史公钥（archive/public-<kid>.pem）。
+// 兼容旧版遗留的 private-<kid>.pem 归档：提取公钥改写为 public 归档后
+// 删除私钥文件（QX-007 迁移，旧私钥不再保留）。
 // 单个损坏的归档密钥只跳过、不致命：它签发的令牌自然已过期，不应拖垮启动。
 func loadArchivedPublicKeys(dir string) map[string]*rsa.PublicKey {
 	out := map[string]*rsa.PublicKey{}
@@ -273,26 +280,53 @@ func loadArchivedPublicKeys(dir string) map[string]*rsa.PublicKey {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, "private-") || !strings.HasSuffix(name, ".pem") {
+		if e.IsDir() || !strings.HasSuffix(name, ".pem") {
 			continue
 		}
-		der, err := readPEMFile(filepath.Join(dir, idpArchiveDir, name))
-		if err != nil {
-			continue
+		switch {
+		case strings.HasPrefix(name, "public-"):
+			kid := strings.TrimSuffix(strings.TrimPrefix(name, "public-"), ".pem")
+			if kid == "" {
+				continue
+			}
+			der, err := readPEMFile(filepath.Join(dir, idpArchiveDir, name))
+			if err != nil {
+				continue
+			}
+			parsed, err := x509.ParsePKIXPublicKey(der)
+			if err != nil {
+				continue
+			}
+			if pub, ok := parsed.(*rsa.PublicKey); ok {
+				out[kid] = pub
+			}
+		case strings.HasPrefix(name, "private-"):
+			// 旧版归档的是私钥：提取公钥后立即销毁私钥文件。
+			kid := strings.TrimSuffix(strings.TrimPrefix(name, "private-"), ".pem")
+			if kid == "" {
+				continue
+			}
+			legacy := filepath.Join(dir, idpArchiveDir, name)
+			der, err := readPEMFile(legacy)
+			if err != nil {
+				continue
+			}
+			parsed, err := x509.ParsePKCS8PrivateKey(der)
+			if err != nil {
+				continue
+			}
+			priv, ok := parsed.(*rsa.PrivateKey)
+			if !ok {
+				continue
+			}
+			out[kid] = &priv.PublicKey
+			if pubDER, merr := x509.MarshalPKIXPublicKey(&priv.PublicKey); merr == nil {
+				pubPath := filepath.Join(dir, idpArchiveDir, "public-"+kid+".pem")
+				if werr := os.WriteFile(pubPath, pemEncode(idpPublicType, pubDER), 0o644); werr == nil {
+					_ = os.Remove(legacy)
+				}
+			}
 		}
-		parsed, err := x509.ParsePKCS8PrivateKey(der)
-		if err != nil {
-			continue
-		}
-		priv, ok := parsed.(*rsa.PrivateKey)
-		if !ok {
-			continue
-		}
-		kid := strings.TrimSuffix(strings.TrimPrefix(name, "private-"), ".pem")
-		if kid == "" {
-			continue
-		}
-		out[kid] = &priv.PublicKey
 	}
 	return out
 }

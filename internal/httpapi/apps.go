@@ -658,6 +658,11 @@ func (a *Gateway) parseAppZip(r io.ReaderAt, size int64) (appManifest, map[strin
 		if strings.HasPrefix(name, "/") || strings.Contains(name, "..") || name == "" {
 			return appManifest{}, nil, fmt.Errorf("压缩包含非法路径: %q", f.Name)
 		}
+		// .qx-* 是宿主保留元数据（如 .qx-source 开发重定向标记）：安装包夹带会
+		// 劫持应用文件根到宿主任意目录（QX-001），与 git 安装路径一致直接拒包。
+		if strings.HasPrefix(path.Base(name), ".qx-") {
+			return appManifest{}, nil, fmt.Errorf("压缩包含保留元数据文件: %q", f.Name)
+		}
 		byName[name] = f
 	}
 
@@ -1030,7 +1035,11 @@ func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	ct := appFileTypes[strings.ToLower(filepath.Ext(rel))]
 	if ct == "" {
-		ct = "application/octet-stream"
+		// 白名单外的扩展名一律 404（与 appFileTypes 注释一致）：防止应用目录里
+		// 的意外文件（数据库、私钥、无扩展名文件）被当作 octet-stream 投递（QX-015）。
+		a.log.Warn("app file type not allowed", "id", id, "path", raw)
+		writeErr(rec, http.StatusNotFound, fmt.Errorf("应用文件不存在：%s", raw))
+		return
 	}
 
 	rec.Header().Set("Content-Type", ct)
@@ -1055,7 +1064,7 @@ func embeddedAppFile(id, rel string) ([]byte, string, bool) {
 	}
 	ct := appFileTypes[strings.ToLower(path.Ext(rel))]
 	if ct == "" {
-		ct = "application/octet-stream"
+		return nil, "", false
 	}
 	return data, ct, true
 }

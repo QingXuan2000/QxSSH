@@ -170,7 +170,7 @@ func (a *Gateway) routes() http.Handler {
 	a.sysNoBody("POST", "hosts/import", "hosts:import", a.handleImportHosts)
 	a.sysNoBody("POST", "hosts/update", "hosts:update", a.handleUpdateHost)
 	a.sysPerm("POST", "hosts/delete", "hosts:delete", a.handleDeleteHost)
-	a.sysPerm("POST", "hosts/test", "hosts:test", a.handleTestHost)
+	a.sysNoBody("POST", "hosts/test", "hosts:test", a.handleTestHost)
 
 	a.sysPerm("POST", "hosts/preconnect", "hosts:preconnect", a.handlePreconnectHost)
 

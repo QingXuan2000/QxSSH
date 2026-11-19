@@ -72,6 +72,10 @@ func (a *Gateway) handleDeleteHost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, okResp{OK: true})
 }
 
+// handleTestHost 测试主机连通性。带 id 时只允许「换凭据试连原目标」：
+// 地址/端口/用户/密钥路径/跳板一律使用已保存值，禁止请求体覆盖——否则
+// 保存的凭据会被发送到调用者指定的任意服务器（QX-002）。不带 id 时按
+// 请求体给出的完整参数试连新主机（凭据由调用者自行提供，不涉及已存凭据）。
 func (a *Gateway) handleTestHost(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID            string `json:"id"`
@@ -100,14 +104,10 @@ func (a *Gateway) handleTestHost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.Address != "" {
-			h.Address = req.Address
-		}
-		if req.Port != 0 {
-			h.Port = req.Port
-		}
-		if req.User != "" {
-			h.User = req.User
+		// 已存主机的连接参数不可覆盖：已解密凭据只能用于原目标（QX-002）。
+		if req.Address != "" || req.Port != 0 || req.User != "" || req.KeyPath != "" || req.JumpHostID != nil {
+			writeErr(w, http.StatusBadRequest, errors.New("测试已保存主机时不允许覆盖地址/端口/用户/密钥路径/跳板；如需测试新目标请不要携带 id"))
+			return
 		}
 		if req.AuthType != "" {
 			h.AuthType = req.AuthType
@@ -124,14 +124,8 @@ func (a *Gateway) handleTestHost(w http.ResponseWriter, r *http.Request) {
 		if req.KeyData != "" {
 			h.KeyData = req.KeyData
 		}
-		if req.KeyPath != "" {
-			h.KeyPath = req.KeyPath
-		}
 		if req.KeyPassphrase != "" {
 			h.KeyPassphrase = req.KeyPassphrase
-		}
-		if req.JumpHostID != nil {
-			h.JumpHostID = *req.JumpHostID
 		}
 	} else {
 		h = config.Host{

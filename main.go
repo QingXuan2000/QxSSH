@@ -131,7 +131,7 @@ func run() int {
 			fmt.Fprintf(os.Stderr, "rotate signing key: %v\n", err)
 			return 1
 		}
-		fmt.Println("签名密钥已轮换；旧密钥保留在 <conf>/keys/archive/ 仅用于验签。")
+		fmt.Println("签名密钥已轮换；旧公钥保留在 <conf>/keys/archive/ 仅用于验签，旧私钥已销毁。")
 	}
 
 	srv, err := bootstrap.New(store, lg)

@@ -243,6 +243,11 @@ func (a *Gateway) handleScheduleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("host 不存在"))
 		return
 	}
+	// 创建调度即承诺未来执行命令：与 fireSchedule 一致复核执行权限，
+	// 防止仅持 schedule:create 的应用绕过 exec:run（QX-009）。
+	if !a.requireExecPerm(w, r, req.Host) {
+		return
+	}
 	if err := validateExecArgv(req.Argv); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -329,6 +334,10 @@ func (a *Gateway) handleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		sc.Enabled = *req.Enabled
 	}
+	// 更新可能改写目标主机/命令：按更新后的主机复核执行权限（QX-009）。
+	if !a.requireExecPerm(w, r, sc.Host) {
+		return
+	}
 	if err := a.store.SaveSchedule(sc); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -364,6 +373,11 @@ func (a *Gateway) handleScheduleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	sc, ok := a.findSchedule(w, r, req.ID)
 	if !ok {
+		return
+	}
+	// 手动触发与 cron 触发（fireSchedule）同权：复核执行权限，
+	// 防止仅持 schedule:run 的应用绕过 exec:run（QX-009）。
+	if !a.requireExecPerm(w, r, sc.Host) {
 		return
 	}
 	run, ok := a.jobClient(w, r, sc.Host)

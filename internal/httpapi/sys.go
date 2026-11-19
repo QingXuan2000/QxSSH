@@ -200,6 +200,13 @@ type auditCapture struct {
 func newAuditCapture(r *http.Request) *auditCapture {
 	c := &auditCapture{headers: make(map[string]string, len(r.Header))}
 	for k, v := range r.Header {
+		// 认证类请求头（X-Qx-Session/Authorization/Cookie 等）在捕获阶段即脱敏：
+		// 实时审计与归档共用同一敏感名规则，防止 logs:readSensitive 持有者
+		// 从在线明细里读出宿主令牌/部署令牌（QX-006）。
+		if auditSensitiveName.MatchString(k) {
+			c.headers[k] = redactedValue
+			continue
+		}
 		c.headers[k] = truncStr(strings.Join(v, ", "), auditHeaderMax)
 	}
 	if r.ContentLength > 0 {
@@ -235,23 +242,10 @@ func newAuditCapture(r *http.Request) *auditCapture {
 	return c
 }
 
-func redactSessionInQuery(raw string) string {
-	if raw == "" || (!strings.Contains(raw, "session=") && !strings.Contains(raw, "token=")) {
-		return raw
-	}
-	parts := strings.Split(raw, "&")
-	for i, p := range parts {
-		if k, _, ok := strings.Cut(p, "="); ok && (k == "session" || k == "token") {
-			parts[i] = k + "=" + redactedValue
-		}
-	}
-	return strings.Join(parts, "&")
-}
-
 func (c *auditCapture) finish(r *http.Request, rec *statusWriter) *auditVerbose {
 	v := &auditVerbose{
 
-		Query:   truncStr(redactSessionInQuery(r.URL.RawQuery), auditHeaderMax),
+		Query:   truncStr(sanitizeAuditQuery(r.URL.RawQuery), auditHeaderMax),
 		Headers: c.headers,
 		Remote:  r.RemoteAddr,
 		Agent:   truncStr(r.Header.Get("User-Agent"), auditHeaderMax),
@@ -264,7 +258,7 @@ func (c *auditCapture) finish(r *http.Request, rec *statusWriter) *auditVerbose 
 		RespBytes: rec.n,
 	}
 	if len(c.body) > 0 {
-		v.Body = string(c.body)
+		v.Body = sanitizeAuditBody(string(c.body))
 	}
 	if c.total > 0 {
 		v.BodyBytes = c.total
