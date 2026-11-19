@@ -44,10 +44,14 @@ type knownHosts struct {
 
 	// entries: host -> algo -> base64(key)
 	entries map[string]map[string]string
+
+	// onFirstTrust 在首次信任某主机公钥时回调（QX-021 部分修复：
+	// 静默 TOFU 至少留下可追溯的指纹记录；交互式确认属后续设计项）。
+	onFirstTrust func(host, algo, fp string)
 }
 
-func newKnownHosts(configDir string) *knownHosts {
-	kh := &knownHosts{entries: map[string]map[string]string{}}
+func newKnownHosts(configDir string, onFirstTrust func(host, algo, fp string)) *knownHosts {
+	kh := &knownHosts{entries: map[string]map[string]string{}, onFirstTrust: onFirstTrust}
 	if configDir == "" {
 		return kh
 	}
@@ -96,6 +100,9 @@ func (kh *knownHosts) verify(hostname string, key ssh.PublicKey) error {
 	if !known {
 		kh.entries[hostname] = map[string]string{algo: encoded}
 		kh.saveLocked()
+		if kh.onFirstTrust != nil {
+			kh.onFirstTrust(hostname, algo, fingerprint(encoded))
+		}
 		return nil
 	}
 	if recorded, ok := trusted[algo]; ok && recorded == encoded {

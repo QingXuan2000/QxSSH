@@ -99,7 +99,10 @@ func New(store *config.Store, log *logging.Logger) *Pool {
 		conns: map[string]*entry{},
 		store: store,
 		log:   log,
-		hosts: newKnownHosts(store.Dir()),
+		hosts: newKnownHosts(store.Dir(), func(host, algo, fp string) {
+			// 首次信任留痕（QX-021）：静默 TOFU 的指纹进日志，便于事后追溯。
+			log.Info("ssh host key first trust (TOFU)", "addr", host, "algo", algo, "fingerprint", fp)
+		}),
 	}
 }
 
