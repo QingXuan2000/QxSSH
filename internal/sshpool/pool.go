@@ -160,16 +160,58 @@ func newClientWithTimeout(conn net.Conn, addr string, cfg *ssh.ClientConfig) (*s
 	}
 }
 
+// modernHostKeyAlgos 只接受现代主机键算法：剔除 ssh-rsa（SHA-1 签名）与
+// ssh-dss（DSA）（QX-022）。已知主机的历史信任算法经 pinnedAlgos 优先保留。
+var modernHostKeyAlgos = []string{
+	ssh.KeyAlgoED25519,
+	ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+	ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256,
+}
+
 func (m *Pool) clientConfig(h config.Host, addr string) (*ssh.ClientConfig, error) {
 	methods, err := m.authMethods(h)
 	if err != nil {
 		return nil, err
 	}
+	// 已知主机优先提议已记录的算法，使协商结果落在信任集内（QX-020）。
+	pinned := m.hosts.pinnedAlgos(addr)
+	hkAlgos := make([]string, 0, len(pinned)+len(modernHostKeyAlgos))
+	hkAlgos = append(hkAlgos, pinned...)
+	for _, a := range modernHostKeyAlgos {
+		dup := false
+		for _, p := range pinned {
+			if p == a {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			hkAlgos = append(hkAlgos, a)
+		}
+	}
 	return &ssh.ClientConfig{
-		User:            h.User,
-		Auth:            methods,
-		HostKeyCallback: m.hosts.callback(addr),
-		Timeout:         dialTimeout,
+		User:              h.User,
+		Auth:              methods,
+		HostKeyCallback:   m.hosts.callback(addr),
+		Timeout:           dialTimeout,
+		HostKeyAlgorithms: hkAlgos,
+		// 显式现代算法集：剔除 SHA-1 KEX/MAC 等弱选项，防协商降级（QX-022）。
+		Config: ssh.Config{
+			KeyExchanges: []string{
+				"curve25519-sha256", "curve25519-sha256@libssh.org",
+				"ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521",
+				"diffie-hellman-group16-sha512", "diffie-hellman-group14-sha256",
+			},
+			Ciphers: []string{
+				"chacha20-poly1305@openssh.com",
+				"aes256-gcm@openssh.com", "aes128-gcm@openssh.com",
+				"aes256-ctr", "aes192-ctr", "aes128-ctr",
+			},
+			MACs: []string{
+				"hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com",
+				"hmac-sha2-256", "hmac-sha2-512",
+			},
+		},
 	}, nil
 }
 
