@@ -439,7 +439,22 @@ func (a *Gateway) decodePermReq(r *http.Request) (permManageReq, error) {
 	return req, nil
 }
 
+// requirePermAdmin 门禁权限管理端点：仅宿主与内置应用（设置界面）可管理
+// 应用授权。第三方应用即使被授予 perm:grant 也不得自我授予任意权限——
+// 该权限对第三方等价万能钥匙（QX-028）。
+func (a *Gateway) requirePermAdmin(w http.ResponseWriter, r *http.Request) bool {
+	app := callerApp(r)
+	if app == hostApp || systemAppIDs[app] {
+		return true
+	}
+	writeErr(w, http.StatusForbidden, errors.New("权限管理仅限宿主控制台使用"))
+	return false
+}
+
 func (a *Gateway) handlePermGrant(w http.ResponseWriter, r *http.Request) {
+	if !a.requirePermAdmin(w, r) {
+		return
+	}
 	req, err := a.decodePermReq(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -484,6 +499,9 @@ func (a *Gateway) handlePermGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handlePermRevoke(w http.ResponseWriter, r *http.Request) {
+	if !a.requirePermAdmin(w, r) {
+		return
+	}
 	req, err := a.decodePermReq(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -509,6 +527,9 @@ func (a *Gateway) handlePermRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handlePermClear(w http.ResponseWriter, r *http.Request) {
+	if !a.requirePermAdmin(w, r) {
+		return
+	}
 	var req struct {
 		App  string `json:"app"`
 		Host string `json:"host,omitempty"`

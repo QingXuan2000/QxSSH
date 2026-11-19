@@ -145,6 +145,11 @@ func (a *Gateway) handleLinkApp(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	// 重新 link 同样视为新应用：吊销旧令牌、清空旧授权（QX-011）。
+	a.invalidateAppTokens(m.ID)
+	if err := a.store.ClearGrants(m.ID); err != nil {
+		a.log.Warn("clear old grants on link failed", "id", m.ID, "err", err.Error())
+	}
 	if err := os.WriteFile(filepath.Join(root, appSourceMarker), []byte(dir+"\n"), 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

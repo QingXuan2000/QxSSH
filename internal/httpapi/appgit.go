@@ -315,6 +315,12 @@ func copyAppDir(srcDir, destDir string) error {
 			return err
 		}
 		name := d.Name()
+		// 符号链接一律拒装：恶意仓库可用符号链接指向宿主敏感文件
+		// （data.db、/etc/shadow 等），复制会把其内容搬进可公开读取的
+		// 应用目录（QX-012）。
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("应用目录含符号链接，拒绝安装：%q", name)
+		}
 		if d.IsDir() {
 			if name == ".git" {
 				return filepath.SkipDir

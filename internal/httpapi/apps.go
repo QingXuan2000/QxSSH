@@ -460,6 +460,11 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
+		// 与 zip 路径一致：覆盖安装吊销旧令牌、清空旧授权（QX-011）。
+		a.invalidateAppTokens(m.ID)
+		if err := a.store.ClearGrants(m.ID); err != nil {
+			a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
+		}
 		if len(m.Permissions) > 0 {
 			if err := a.store.Grant(m.ID, m.Permissions); err != nil {
 				a.log.Warn("grant manifest permissions failed", "id", m.ID, "err", err.Error())
@@ -505,6 +510,13 @@ func (a *Gateway) installAndGrantZip(w http.ResponseWriter, data []byte) {
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+
+	// 覆盖安装视为新应用：吊销旧令牌并清空旧授权，防止木马包继承受害
+	// 应用的身份与已授权限（QX-011）。全新安装时这两步是空操作。
+	a.invalidateAppTokens(m.ID)
+	if err := a.store.ClearGrants(m.ID); err != nil {
+		a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
 	}
 
 	if len(m.Permissions) > 0 {
