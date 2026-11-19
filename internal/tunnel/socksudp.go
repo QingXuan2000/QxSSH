@@ -31,6 +31,10 @@ const (
 	socksAgentIdleTTL = 10 * time.Minute
 	// socksJanitorEvery 是空闲中继的扫描周期。
 	socksJanitorEvery = 30 * time.Second
+	// socksMaxAssocs / socksMaxPipes 是单条动态转发的关联数与单关联的
+	// 目标管道数上限（QX-063）：防止本地进程无限开关联/管道耗尽资源。
+	socksMaxAssocs = 32
+	socksMaxPipes  = 256
 )
 
 // socksUDP 挂在一条动态转发上，负责 UDP ASSOCIATE 的公共部分：共享的远端中继。
@@ -110,7 +114,7 @@ func (su *socksUDP) relay() (*udpAgent, error) {
 func (su *socksUDP) beginAssoc() bool {
 	su.mu.Lock()
 	defer su.mu.Unlock()
-	if su.closed {
+	if su.closed || su.assocs >= socksMaxAssocs {
 		return false
 	}
 	su.assocs++
@@ -272,6 +276,10 @@ func (a *socksAssoc) pipeFor(target string) (*socksPipe, error) {
 		a.mu.Unlock()
 		return p, nil
 	}
+	if len(a.pipes) >= socksMaxPipes {
+		a.mu.Unlock()
+		return nil, errors.New("UDP 目标管道数已达上限")
+	}
 	a.mu.Unlock()
 
 	ag, err := a.su.relay()
@@ -290,6 +298,12 @@ func (a *socksAssoc) pipeFor(target string) (*socksPipe, error) {
 		a.mu.Unlock()
 		fresh.close()
 		return existing, nil
+	}
+	// 并发新建可能越过早检：插入前再核一次上限（QX-063）。
+	if len(a.pipes) >= socksMaxPipes {
+		a.mu.Unlock()
+		fresh.close()
+		return nil, errors.New("UDP 目标管道数已达上限")
 	}
 	a.pipes[target] = fresh
 	a.mu.Unlock()
