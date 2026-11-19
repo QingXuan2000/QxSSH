@@ -184,6 +184,12 @@ func (a *Gateway) sysDispatch(w http.ResponseWriter, r *http.Request) {
 		Scope:    scopes,
 		JTI:      jti,
 	}
+	// WS 会话不做 verbose 体捕获，但命令/参数必须留痕（QX-031）：
+	// exec/session 的 argv、term/session 的 host/cwd 都在查询串里，
+	// 经敏感键脱敏后记入 Detail，Duration 即会话时长。
+	if ws {
+		entry.Detail = truncStr(sanitizeAuditQuery(r.URL.RawQuery), auditHeaderMax)
+	}
 	if cap != nil {
 		entry.Verbose = cap.finish(r, rec)
 	}

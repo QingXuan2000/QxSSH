@@ -44,6 +44,30 @@ func peekHostID(r *http.Request) string {
 	if p, ok := r.Body.(*peekBody); ok && p.valid {
 		return p.hostID
 	}
+	// JSON 请求以请求体的 host 字段为准（QX-032）：query 可被调用者任意
+	// 附加，优先取它会让审计归属被 spoof；body 才是实际执行参数。
+	// body 解析过但无 host 字段（如本机执行）时不再回退 query。
+	if r.Body != nil && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		buf := make([]byte, hostPeekMax)
+		n := readUpTo(r.Body, buf)
+		if n == 0 {
+			return ""
+		}
+		body := r.Body
+		head := buf[:n]
+		p := &peekBody{
+			Reader: io.MultiReader(bytes.NewReader(head), body),
+			closer: body,
+			head:   head,
+			rest:   body,
+			valid:  true,
+		}
+		r.Body = p
+		if m := hostFieldRe.FindSubmatch(head); m != nil && safeHostID(string(m[1])) {
+			p.hostID = string(m[1])
+		}
+		return p.hostID
+	}
 	q := r.URL.Query()
 	if v := strings.TrimSpace(q.Get("host")); v != "" && safeHostID(v) {
 		return v
@@ -51,28 +75,7 @@ func peekHostID(r *http.Request) string {
 	if v := strings.TrimSpace(q.Get(auditWSParam)); v != "" && safeHostID(v) {
 		return v
 	}
-	if r.Body == nil || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		return ""
-	}
-	buf := make([]byte, hostPeekMax)
-	n := readUpTo(r.Body, buf)
-	if n == 0 {
-		return ""
-	}
-	body := r.Body
-	head := buf[:n]
-	p := &peekBody{
-		Reader: io.MultiReader(bytes.NewReader(head), body),
-		closer: body,
-		head:   head,
-		rest:   body,
-		valid:  true,
-	}
-	r.Body = p
-	if m := hostFieldRe.FindSubmatch(head); m != nil && safeHostID(string(m[1])) {
-		p.hostID = string(m[1])
-	}
-	return p.hostID
+	return ""
 }
 
 func safeHostID(id string) bool {
