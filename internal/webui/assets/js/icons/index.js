@@ -137,7 +137,9 @@ export function iconPair(spec) {
 function plainAppIcon(name, cls, appId) {
   const n = String(name || '');
   if (/\.[a-z0-9]+$/i.test(n) && appId) {
-    return `<img class="${cls} qicon-img" src="${appFileUrl(appId, n)}" alt="" aria-hidden="true">`;
+    const url = appFileUrl(appId, n);
+    // 无文件能力令牌（QX-015）时回退默认图标，避免渲染空 src。
+    if (url) return `<img class="${cls} qicon-img" src="${url}" alt="" aria-hidden="true">`;
   }
   const key = n && (CUSTOM_PATHS[n] || lucideKey(n)) ? n : 'hosts';
   return icon(key, cls);

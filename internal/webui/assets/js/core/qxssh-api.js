@@ -258,11 +258,25 @@ export function setAppEnabled(id, enabled) {
   return sysCall('apps/enabled', { id, enabled });
 }
 
-/** 拼装应用内静态文件的访问地址 */
+// 应用文件能力令牌表（QX-015）：apps/file 路由要求路径中携带每应用令牌，
+// 令牌经 apps/list 仅发放给宿主/内置应用。宿主桌面与 store 在拉取应用列表
+// 后调用 setAppFileTokens 注入；拿不到令牌的上下文无法构造他应用文件地址。
+const appFileTokens = new Map();
+
+/** 注入应用文件能力令牌（apps/list 响应条目，含 id 与 fileToken） */
+export function setAppFileTokens(entries) {
+  for (const e of entries || []) {
+    if (e && e.id && e.fileToken) appFileTokens.set(String(e.id), String(e.fileToken));
+  }
+}
+
+/** 拼装应用内静态文件的访问地址（无令牌时返回空串，调用方自行兜底） */
 export function appFileUrl(id, path) {
   const entry = String(path || 'index.html').replace(/\\/g, '/').replace(/^\/+/, '');
   const tail = entry.split('/').map(encodeURIComponent).join('/');
-  return `${API_BASE}/apps/file/${encodeURIComponent(id)}/${tail}`;
+  const tok = appFileTokens.get(String(id));
+  if (!tok) return '';
+  return `${API_BASE}/apps/file/${encodeURIComponent(id)}/${encodeURIComponent(tok)}/${tail}`;
 }
 
 /** 取可申请的权限目录 */

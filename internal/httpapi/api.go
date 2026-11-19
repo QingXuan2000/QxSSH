@@ -74,6 +74,11 @@ type Gateway struct {
 	sftpMu      sync.Mutex
 	sftpClients map[string]*sftpShared
 
+	// appFileToks 是应用文件端点的能力路径令牌（每应用一枚，内存态、每次启动重生成）：
+	// 只有宿主/内置应用经 apps/list 拿到令牌，未鉴权的跨应用/跨站读取被 404（QX-015）。
+	appFileMu   sync.Mutex
+	appFileToks map[string]string
+
 	elevMu   sync.Mutex
 	elevInfo map[string]elevCacheEntry
 }
@@ -93,6 +98,7 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.bgProcs = map[string]*bgProc{}
 	a.wsSlots = make(chan struct{}, wsMaxSessions)
 	a.sftpClients = map[string]*sftpShared{}
+	a.appFileToks = map[string]string{}
 	a.elevInfo = map[string]elevCacheEntry{}
 
 	// 签名密钥是 IdP 的根基：读不出来就起不来，否则应用会拿到无法验签的令牌。
@@ -151,7 +157,7 @@ func (a *Gateway) routes() http.Handler {
 	mux.HandleFunc("/.well-known/jwks.json", a.handleJWKS)
 	mux.HandleFunc("/api/v1/jwks", a.handleJWKS)
 
-	mux.HandleFunc("GET /api/v1/apps/file/{id}/{path...}", a.handleServeAppFile)
+	mux.HandleFunc("GET /api/v1/apps/file/{id}/{tok}/{path...}", a.handleServeAppFile)
 
 	mux.HandleFunc("/api/v1/{ns}", a.sysDispatch)
 	mux.HandleFunc("/api/v1/ws/{ns}/{method}", a.sysDispatch)

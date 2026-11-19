@@ -19,7 +19,7 @@ import {
 } from '/assets/js/core/components.js';
 import { createAppShell } from '/assets/js/core/app-shell.js';
 import {
-  listUserApps, validateApp, installApp, uninstallApp, setAppEnabled, auditNote, linkApp, getGitBranches,
+  listUserApps, validateApp, installApp, uninstallApp, setAppEnabled, auditNote, linkApp, getGitBranches, setAppFileTokens,
 } from '/assets/js/core/qxssh-api.js';
 import { appIcon } from '/assets/js/icons/index.js';
 import { setIconHidden, hiddenIconIds } from '/assets/js/desktop/iconvis.js';
@@ -138,7 +138,9 @@ function boot(el) {
     if (loaded && !force) return;
     error.next = '';
     try {
-      apps.next = await listUserApps();
+      const list = await listUserApps();
+      setAppFileTokens(list); // 应用图标经 appFileUrl 取地址，需要文件能力令牌（QX-015）
+      apps.next = list;
       loaded = true;
     } catch (e) {
       error.next = e?.message || t('app.store.err-list-failed');

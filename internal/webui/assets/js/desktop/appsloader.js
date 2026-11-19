@@ -35,6 +35,8 @@ export async function loadUserApps() {
     return;
   }
   userAppsLoaded = true;
+  // 注入文件能力令牌（QX-015）：userAppFrame 与图标渲染都经 appFileUrl 取地址。
+  api.setAppFileTokens(list);
   for (const a of getApps().filter((x) => x.source === 'store' || x.source === 'builtin')) {
     unregisterApp(a.id);
   }

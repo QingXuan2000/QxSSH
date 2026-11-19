@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -312,14 +313,42 @@ type appEntry struct {
 
 	Source string `json:"source"`
 
+	// FileToken 是应用文件端点的能力路径令牌，仅对宿主/内置应用发放（QX-015）。
+	FileToken string `json:"fileToken,omitempty"`
+
 	Dev       bool        `json:"dev,omitempty"`
 	SourceDir string      `json:"sourceDir,omitempty"`
 	Git       *appGitMeta `json:"git,omitempty"`
 }
 
+// appFileTok 取（必要时生成）某应用的文件能力令牌。令牌内存态、每次启动
+// 重生成：前端每次启动都经 apps/list 重新取地址，无需持久化。
+func (a *Gateway) appFileTok(id string) string {
+	a.appFileMu.Lock()
+	defer a.appFileMu.Unlock()
+	if tok, ok := a.appFileToks[id]; ok {
+		return tok
+	}
+	tok := randTok()
+	a.appFileToks[id] = tok
+	return tok
+}
+
 // handleListUserApps 返回内置应用加 apps 目录下的第三方应用，按 id 排序；
 // 单个目录清单损坏直接跳过，不让一个坏应用拖垮整个列表。
 func (a *Gateway) handleListUserApps(w http.ResponseWriter, r *http.Request) {
+	// 文件能力令牌仅发放给宿主与内置应用：第三方应用即使持有 apps:list
+	// 也拿不到其他应用的文件访问路径（QX-015）。
+	caller := callerApp(r)
+	privileged := caller == hostApp || systemAppIDs[caller]
+	stampTokens := func(list []appEntry) {
+		if !privileged {
+			return
+		}
+		for i := range list {
+			list[i].FileToken = a.appFileTok(list[i].ID)
+		}
+	}
 	dir := a.appsDir()
 	entries, err := os.ReadDir(dir)
 	out := make([]appEntry, 0, len(systemApps)+8)
@@ -327,6 +356,7 @@ func (a *Gateway) handleListUserApps(w http.ResponseWriter, r *http.Request) {
 		out = append(out, a.appEntryOf(m, "builtin"))
 	}
 	if errors.Is(err, os.ErrNotExist) {
+		stampTokens(out)
 		writeJSON(w, appsListResp{Apps: out})
 		return
 	}
@@ -374,6 +404,7 @@ func (a *Gateway) handleListUserApps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	stampTokens(out)
 	writeJSON(w, appsListResp{Apps: out})
 }
 
@@ -1048,10 +1079,30 @@ var appFileTypes = map[string]string{
 	".wasm":  "application/wasm",
 }
 
+// sandboxAppContent 给可执行脚本的应用内容（HTML/SVG）附加与 iframe 沙箱
+// 标志一致的 CSP sandbox：即使用户被诱导顶层导航到该地址，文档仍在沙箱内
+// 运行（不透明源），读不到宿主同源页面注入的令牌（QX-013）。
+func sandboxAppContent(h http.Header, ct string) {
+	if strings.HasPrefix(ct, "text/html") || ct == "image/svg+xml" {
+		h.Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads")
+	}
+}
+
 // handleServeAppFile 提供 apps/<id>/<path> 静态文件：拒绝隐藏文件段、目录自动补
 // index.html、强制 no-cache；第三方应用目录里没有时，内置应用回退到嵌入 FS。
 func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !appIDRe.MatchString(id) {
+		writeErr(w, http.StatusBadRequest, errors.New("应用 id 非法"))
+		return
+	}
+	// 能力路径令牌校验（QX-015）：令牌仅经 apps/list 发放给宿主/内置应用，
+	// 未鉴权的跨应用/跨站读取在此 404。子资源相对路径自动继承令牌段。
+	if subtle.ConstantTimeCompare([]byte(r.PathValue("tok")), []byte(a.appFileTok(id))) != 1 {
+		a.log.Warn("app file token mismatch", "id", id)
+		writeErr(w, http.StatusNotFound, errors.New("应用文件不存在"))
+		return
+	}
 	start := time.Now()
 	rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	defer func() {
@@ -1064,10 +1115,6 @@ func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 			Duration: time.Since(start).Milliseconds(),
 		})
 	}()
-	if !appIDRe.MatchString(id) {
-		writeErr(rec, http.StatusBadRequest, errors.New("应用 id 非法"))
-		return
-	}
 	raw := r.PathValue("path")
 	rel := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
 	rel = strings.TrimPrefix(rel, "/")
@@ -1100,6 +1147,7 @@ func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 
 		if data, ct, ok := embeddedAppFile(id, rel); ok {
 			rec.Header().Set("Content-Type", ct)
+			sandboxAppContent(rec.Header(), ct)
 			rec.Header().Set("Cache-Control", "no-cache")
 			rec.Header().Set("Content-Length", strconv.Itoa(len(data)))
 			_, _ = rec.Write(data)
@@ -1125,6 +1173,7 @@ func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec.Header().Set("Content-Type", ct)
+	sandboxAppContent(rec.Header(), ct)
 	rec.Header().Set("Cache-Control", "no-cache")
 
 	http.ServeContent(rec, r, fi.Name(), fi.ModTime(), f)
