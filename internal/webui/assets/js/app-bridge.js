@@ -763,4 +763,16 @@ window.addEventListener('pointerdown', () => {
   try { post('win-focus'); } catch { }
 }, true);
 
-post('ready');
+// 从入口 URL fragment 读取宿主下发的每帧握手密钥，随 ready 回传：
+// 宿主只向持有密钥的应用文档投递会话令牌（QX-003）。fragment 不发送到
+// 服务器，帧内被动导航进来的外部文档读不到它。
+function frameHandshakeKey() {
+  try {
+    const m = /(?:^|[#&])qxk=([0-9a-f]+)/.exec(location.hash || '');
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+post('ready', { k: frameHandshakeKey() });

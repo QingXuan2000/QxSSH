@@ -77,11 +77,20 @@ function silentBox() {
 function post(iframe, msg) {
   try {
     // 应用是不透明源（sandbox 无 allow-same-origin），targetOrigin 只能用 '*'。
-    // 安全性由接收端的 e.source === window.parent 校验承担；宿主侧见 onMessage 的 e.source 反查。
+    // 来源安全由接收端的 e.source === window.parent 校验承担；宿主侧见 onMessage
+    // 的 e.source 反查。会话令牌的下发另行绑定每帧握手密钥（见 mountAppFrame
+    // 与 'ready' 分支）：load 事件不再无条件推送，被动导航进来的文档拿不到令牌。
     iframe.contentWindow?.postMessage({ __qx: true, ...msg }, '*');
   } catch (err) {
     console.warn('[frame] postMessage 失败', err);
   }
+}
+
+/** 生成每帧一次性握手密钥（hex），经入口 URL fragment 交给应用文档。 */
+function newFrameKey() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
 /** 重新加载应用帧：不透明源下读不到 contentWindow.location，回退为重置 src */
@@ -589,6 +598,10 @@ function onMessage(e) {
   if (!entry) return;
   switch (d.type) {
     case 'ready':
+      // 握手密钥校验（QX-003）：只有从入口 URL fragment 读到密钥的应用文档
+      // 才能触发令牌下发。帧自导航/用户点击外链带入的文档拿不到密钥，
+      // 宿主不会把会话 JWT 推给它们。
+      if (d.k !== entry.frameKey) break;
       markFrameReady(entry);
       sendInit(entry);
       break;
@@ -643,6 +656,7 @@ function onMessage(e) {
           case 'reload':
             if (entry.sessionScopes) entry.sessionScopes.clear();
             entry.grantP = null;
+            entry.ready = false; // 允许重载后的文档重新握手（QX-003）
             reloadFrame(entry.iframe);
             break;
           default: break;
@@ -656,10 +670,11 @@ function onMessage(e) {
       setWinBadge(entry, d.text == null ? '' : String(d.text));
       break;
     case 'perm-changed':
-      notifyPermChanged(d.app || entry.ctx.appId);
+      // 第三方应用只能触发自身重签；跨应用通知仅限内置应用（QX-060）。
+      notifyPermChanged(entry.system ? (d.app || entry.ctx.appId) : entry.ctx.appId);
       break;
     case 'session-revoked-notify':
-      notifySessionRevoked(d.app || entry.ctx.appId);
+      notifySessionRevoked(entry.system ? (d.app || entry.ctx.appId) : entry.ctx.appId);
       break;
     case 'set-lang':
       if (d.lang) setLang(String(d.lang));
@@ -782,16 +797,21 @@ function onMessage(e) {
       if (d.key) {
         const k = String(d.key);
         const v = d.value === '' || d.value === null || d.value === undefined ? '' : String(d.value);
-        if (!v) {
-          delPref(k);
-        } else {
-          setPref(k, v);
-        }
-        if (k === 'qx-taskbar-pos' && v) {
-          setTaskbarPos(v);
-        } else if (k === 'qx-glass-a' && v) {
-          setGlassAlpha(v);
-        }
+        // 全局偏好以宿主身份落库：要求 ui:settings，防止任意应用
+        // 持久篡改壁纸/布局等全局设置（QX-046）。
+        requirePermission(entry, 'ui:settings').then((ok) => {
+          if (!ok) return;
+          if (!v) {
+            delPref(k);
+          } else {
+            setPref(k, v);
+          }
+          if (k === 'qx-taskbar-pos' && v) {
+            setTaskbarPos(v);
+          } else if (k === 'qx-glass-a' && v) {
+            setGlassAlpha(v);
+          }
+        }).catch(() => { });
       }
       break;
     case 'apply-wallpaper':
@@ -907,7 +927,12 @@ registerHostMethod('clipboard.write', async (params) => {
   const ok = await writeClipboard(String(params.text ?? ''));
   return { ok, value: ok };
 });
-registerHostMethod('workspace.info', () => workspaceInfo());
+registerHostMethod('workspace.info', async (_p, { requirePermission: need }) => {
+  // 主机清单属宿主数据：枚举需要 hosts:read，堵住零权限应用的
+  // confused-deputy 信息泄露（QX-027）。
+  if (!(await need('hosts:read'))) return null;
+  return workspaceInfo();
+});
 registerHostMethod('notify', async (params, { requirePermission: need }) => {
   const ok = (await need('ui:notify')) ? notifyHost(params) : false;
   return { ok, value: ok };
@@ -923,12 +948,16 @@ export function reloadAppFrames(id) {
     if (appId && f.ctx.appId !== appId) continue;
     if (f.sessionScopes) f.sessionScopes.clear();
     f.grantP = null;
+    // 重载后允许重新握手：新文档用入口 URL 中的同一密钥再次 ready（QX-003）。
+    f.ready = false;
     if (reloadFrame(f.iframe)) n += 1;
   }
   return n;
 }
 
-registerHostMethod('apps.reload', (params) => {
+registerHostMethod('apps.reload', (params, { entry }) => {
+  // 重载其他应用帧属宿主管理操作：仅限内置应用（QX-060）。
+  if (!entry.system) return { ok: false, value: 0 };
   const n = reloadAppFrames(params.id);
   return { ok: n > 0, value: n };
 });
@@ -1326,7 +1355,11 @@ function frameSrcWithTheme(src, appId) {
 
 export function mountAppFrame(bodyEl, frame, win, opts = {}) {
   const appId = win?.appId || frame.appId || null;
-  const entrySrc = frameSrcWithTheme(frame.src, appId);
+  // 每帧握手密钥经 URL fragment 下发（fragment 不随请求发送到服务器）：
+  // 应用 SDK 在 ready 消息中回传，宿主校验后才投递会话令牌（QX-003）。
+  const frameKey = newFrameKey();
+  const baseSrc = frameSrcWithTheme(frame.src, appId);
+  const entrySrc = baseSrc + (baseSrc.includes('#') ? '&' : '#') + 'qxk=' + frameKey;
   const iframe = dom('iframe', {
     class: FRAME_CLASS,
     title: win?.title || 'app',
@@ -1343,6 +1376,7 @@ export function mountAppFrame(bodyEl, frame, win, opts = {}) {
     readyTimer: 0,
     errEl: null,
     ctx: { hostId: frame.hostId, appId },
+    frameKey,
     apis: new Map(),
     closeAfterApi: false,
     silent: !!(opts && opts.silent),
@@ -1397,7 +1431,9 @@ export function mountAppFrame(bodyEl, frame, win, opts = {}) {
     if (!frames.has(entry)) return;
     clearTimeout(entry.readyTimer);
     if (!entry.ready) entry.readyTimer = setTimeout(probeFrameEntry, FRAME_READY_MS);
-    sendInit(entry);
+    // 刻意不在 load 事件推送 init/令牌（QX-003）：load 对帧内任何文档都会触发，
+    // 包括应用自导航或用户点击外链带入的外部站点。令牌只经 'ready' 握手
+    // （携带 URL fragment 中的每帧密钥）下发。
   };
   iframe.addEventListener('load', onLoad);
 
