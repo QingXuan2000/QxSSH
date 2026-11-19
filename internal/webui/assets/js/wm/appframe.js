@@ -698,7 +698,9 @@ function onMessage(e) {
     case 'api-return': {
       const reqId = String(d.reqId || '');
       const call = hostCalls.get(reqId);
-      if (!call) break;
+      // 与 api-progress/api-cancel 一致：只有被调用方（call.to）能提交结果，
+      // 防止恶意应用伪造其他应用的跨应用 API 响应（QX-018）。
+      if (!call || call.to !== entry) break;
       hostCalls.delete(reqId);
       clearTimeout(call.timer);
       post(call.from.iframe, {
