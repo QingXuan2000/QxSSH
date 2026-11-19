@@ -537,6 +537,10 @@ type bgProc struct {
 	Started time.Time
 	// App 是发起应用（宿主为空）：status/kill 按归属校验（QX-067）。
 	App string
+	// proc 是启动时取得的进程句柄：kill 直接用它，不再 FindProcess
+	// 按 PID 查找（QX-066，消除查找窗口；PID 复用的内核级竞态需 pidfd，
+	// Go 标准库未提供，持锁+finished 检查已把窗口收窄到最小）。
+	proc *os.Process
 
 	mu       sync.Mutex
 	buf      bytes.Buffer
@@ -582,13 +586,12 @@ func (p *bgProc) snapshot() bgSnapshot {
 }
 
 func (p *bgProc) kill() {
+	// 持锁检查并终止（QX-066）：Wait  goroutine 在同一把锁下置 finished，
+	// 进程已回收后不再触碰可能已被复用的 PID。
 	p.mu.Lock()
-	running := !p.finished
-	p.mu.Unlock()
-	if running && p.PID > 0 {
-		if proc, err := os.FindProcess(p.PID); err == nil {
-			_ = proc.Kill()
-		}
+	defer p.mu.Unlock()
+	if !p.finished && p.proc != nil {
+		_ = p.proc.Kill()
 	}
 }
 
@@ -618,6 +621,7 @@ func (a *Gateway) startBackground(argv []string, cwd string, elevated bool, app 
 		return bgStartResp{}, err
 	}
 	p.PID = cmd.Process.Pid
+	p.proc = cmd.Process
 
 	a.bgMu.Lock()
 	a.bgProcs[id] = p

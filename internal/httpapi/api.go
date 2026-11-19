@@ -44,6 +44,10 @@ type Gateway struct {
 	// sudoAttempts 是 sudo 密码尝试的限速窗口（每主机，QX-069）。
 	sudoAttempts map[string][]time.Time
 
+	// authFails 是部署令牌鉴权失败的限速窗口（每来源 IP，QX-058）。
+	authFailMu sync.Mutex
+	authFails  map[string][]time.Time
+
 	sysTable map[string]*sysEntry
 	hostTok  string
 	// hostClaims 是宿主不透明口令对应的内存「令牌」：不落盘、不过期、
@@ -104,6 +108,7 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.deny = map[string]int64{}
 	a.loadDenyList(time.Now().Unix())
 	a.sudoAttempts = map[string][]time.Time{}
+	a.authFails = map[string][]time.Time{}
 	a.bgProcs = map[string]*bgProc{}
 	a.jobOwn = map[string]string{}
 	a.wsSlots = make(chan struct{}, wsMaxSessions)
@@ -455,8 +460,41 @@ func (a *Gateway) withAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// 鉴权失败按来源 IP 限速（QX-058）：高熵令牌本不可爆破，
+		// 限速是纵深防御，也挡失败洪泛。
+		ip := r.RemoteAddr
+		if h, _, err := net.SplitHostPort(ip); err == nil {
+			ip = h
+		}
+		if !a.authFailAllowed(ip) {
+			http.Error(w, "Too Many Requests: authentication failures rate limited", http.StatusTooManyRequests)
+			return
+		}
 		http.Error(w, "Unauthorized: invalid or missing auth token", http.StatusUnauthorized)
 	})
+}
+
+// authFailAllowed 每来源 IP 60 秒内最多 20 次鉴权失败（QX-058）。
+func (a *Gateway) authFailAllowed(ip string) bool {
+	a.authFailMu.Lock()
+	defer a.authFailMu.Unlock()
+	if len(a.authFails) > 1024 {
+		a.authFails = map[string][]time.Time{}
+	}
+	now := time.Now()
+	cutoff := now.Add(-60 * time.Second)
+	kept := a.authFails[ip][:0]
+	for _, t := range a.authFails[ip] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= 20 {
+		a.authFails[ip] = kept
+		return false
+	}
+	a.authFails[ip] = append(kept, now)
+	return true
 }
 
 const slowRequestMs = 1500
