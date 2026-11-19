@@ -48,6 +48,7 @@
   "app.store.field-size": "Package size",
   "app.store.perm-declared": "This app declares the following permissions",
   "app.store.perm-adjust-hint": "You can adjust them later under Settings → Permissions.",
+  "app.store.perm-deferred": "These high-risk permissions were not granted at install and will be requested individually on first use: {v1}",
   "app.store.confirm-overwrite": "An app with the same ID is already installed. Continuing overwrites the existing version and its data.",
   "app.store.action-cancel": "Cancel",
   "app.store.action-overwrite": "Overwrite and install",

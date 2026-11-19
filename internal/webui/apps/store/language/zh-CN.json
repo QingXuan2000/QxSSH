@@ -48,6 +48,7 @@
   "app.store.field-size": "包大小",
   "app.store.perm-declared": "该应用预声明了权限",
   "app.store.perm-adjust-hint": "安装后可在设置 → 权限中调整。",
+  "app.store.perm-deferred": "以下高危权限未随安装授予，将在应用首次使用时逐项请求：{v1}",
   "app.store.confirm-overwrite": "本机已安装相同标识的应用，继续将覆盖现有版本及其数据。",
   "app.store.action-cancel": "取消",
   "app.store.action-overwrite": "覆盖安装",

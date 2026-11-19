@@ -54,6 +54,10 @@ type appPackageReq struct {
 	Type   string `json:"type,omitempty"`
 	Branch string `json:"branch,omitempty"`
 	Path   string `json:"path,omitempty"`
+
+	// Consent 是用户在安装确认页逐项确认过的高危权限清单（QX-010）。
+	// Danger≥2 的声明权限只有出现在这里才会随安装授予。
+	Consent []string `json:"consent,omitempty"`
 }
 
 // isGitURL 判断地址是否形似 Git 仓库：.git 后缀，或 git@ / git:// / ssh://git@ 前缀。

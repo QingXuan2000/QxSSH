@@ -301,7 +301,7 @@ function boot(el) {
             close();
             void doInstall({
               validate: () => validateApp({ git: a.git.url, branch: a.git.branch, path: a.git.path }),
-              run: () => installApp({ git: a.git.url, branch: a.git.branch, path: a.git.path }),
+              run: (consent) => installApp({ git: a.git.url, branch: a.git.branch, path: a.git.path }, consent),
               busy: gitBusy,
               msg: gitMsg,
             });
@@ -405,8 +405,13 @@ function boot(el) {
       return;
     }
     try {
-      const m = await run();
+      // 确认页展示的权限清单即用户的同意范围（QX-010）：随安装请求发给后端，
+      // 高危权限只有在此清单内才会被授予，其余延迟到运行时逐项请求。
+      const m = await run((info.app && info.app.permissions) || []);
       toast(tf('app.store.installed', { v1: appName(m) }), 'success');
+      if (Array.isArray(m.deferredPermissions) && m.deferredPermissions.length) {
+        toast(tf('app.store.perm-deferred', { v1: m.deferredPermissions.join(', ') }), 'info');
+      }
       await loadApps(true);
       notifyAppsChanged();
     } catch (e) {
@@ -437,7 +442,7 @@ function boot(el) {
         if (!url) { toast(t('app.store.err-url-required'), 'warning'); return; }
         void doInstall({
           validate: () => validateApp({ url }),
-          run: () => installApp({ url })
+          run: (consent) => installApp({ url }, consent)
             .then((m) => { if (urlInput.current) urlInput.current.value = ''; return m; }),
           busy: urlBusy,
           msg: urlMsg,
@@ -484,7 +489,7 @@ function boot(el) {
           }
           void doInstall({
             validate: () => validateApp(f),
-            run: () => installApp(f),
+            run: (consent) => installApp(f, consent),
             busy: fileBusy,
             msg: fileMsg,
           });
@@ -505,7 +510,7 @@ function boot(el) {
         const payload = { git: url, branch, path };
         void doInstall({
           validate: () => validateApp(payload),
-          run: () => installApp(payload)
+          run: (consent) => installApp(payload, consent)
             .then((m) => {
               if (gitUrlInput.current) gitUrlInput.current.value = '';
               if (gitBranchInput.current) gitBranchInput.current.value = '';

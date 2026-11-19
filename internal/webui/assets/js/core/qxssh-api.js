@@ -234,8 +234,8 @@ export function validateApp(pkg) {
  * 安装应用包。载荷形态与 validateApp 相同；Git 仓库安装成功后，
  * 清单声明的权限由后端一并授予，无需再逐条申请。
  */
-export function installApp(pkg) {
-  return appPkgRequest('apps/install', pkg);
+export function installApp(pkg, consent) {
+  return appPkgRequest('apps/install', pkg, consent);
 }
 
 /** 获取远程 Git 仓库的分支列表及默认分支 */
@@ -534,10 +534,14 @@ export function localFsDelete(path) {
   return sysCall('localfs/delete', { path });
 }
 
-function appPkgRequest(target, pkg) {
+function appPkgRequest(target, pkg, consent) {
+  // consent：用户在安装确认页确认过的权限清单（QX-010）。后端只随安装授予
+  // 低危权限与这里确认过的高危权限，其余延迟到运行时逐项请求。
+  const cons = Array.isArray(consent) ? consent.map(String) : [];
   if (pkg instanceof File || pkg instanceof Blob) {
     const fd = new FormData();
     fd.append('file', pkg, pkg.name || 'app.qxp');
+    fd.append('consent', JSON.stringify(cons));
     return sysFetch('POST', target, { form: fd });
   }
   // Git 仓库必须按 git/branch/path 三字段原样发给后端（见 appPackageReq），
@@ -548,9 +552,10 @@ function appPkgRequest(target, pkg) {
       git: String(pkg.git || pkg.url || ''),
       branch: String(pkg.branch || ''),
       path: String(pkg.path || ''),
+      consent: cons,
     });
   }
-  return sysCall(target, { url: String((pkg && pkg.url) || pkg || '') });
+  return sysCall(target, { url: String((pkg && pkg.url) || pkg || ''), consent: cons });
 }
 
 

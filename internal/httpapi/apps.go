@@ -461,7 +461,9 @@ func downloadAppZip(rawURL string) ([]byte, int, error) {
 
 // handleInstallApp 安装第三方应用，按 Content-Type 与请求体分流三条路径：
 // multipart 走 .qxp 包、JSON 带 git/type=git/仓库形态 url 走克隆、其余 JSON 按下载链接。
-// 三条路径安装成功后都会把 manifest 声明的权限一次性授予（声明即预授权）。
+// 权限授予遵循安装同意（QX-010）：低危（Danger≤1）随安装授予，高危（Danger≥2）
+// 仅授予 consent 清单（multipart 表单字段 consent / JSON consent 数组）中确认过的项，
+// 其余延迟到应用运行时经权限弹窗逐项请求。
 // Git 分支总预算 2 分钟，含克隆、校验与拷贝；下载分支 30 秒。
 func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
@@ -470,7 +472,11 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, st, err)
 			return
 		}
-		a.installAndGrantZip(w, data)
+		var consent []string
+		if raw := r.FormValue("consent"); raw != "" {
+			_ = json.Unmarshal([]byte(raw), &consent)
+		}
+		a.installAndGrantZip(w, data, consent)
 		return
 	}
 
@@ -496,19 +502,7 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		if err := a.store.ClearGrants(m.ID); err != nil {
 			a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
 		}
-		if len(m.Permissions) > 0 {
-			if err := a.store.Grant(m.ID, m.Permissions); err != nil {
-				a.log.Warn("grant manifest permissions failed", "id", m.ID, "err", err.Error())
-			} else {
-				a.audit.record(auditEntry{
-					AppID:  m.ID,
-					Type:   auditPermGrant,
-					Target: "apps/install",
-					Detail: strings.Join(m.Permissions, ","),
-					Result: "ok",
-				})
-			}
-		}
+		_, deferred := a.grantOnInstall(m, req.Consent)
 		a.audit.record(auditEntry{
 			AppID:  m.ID,
 			Type:   auditAPICall,
@@ -517,7 +511,7 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 			Result: "ok",
 		})
 		a.log.Info("app installed from git", "id", m.ID, "name", m.Name.Get(defaultLang), "version", m.Version, "repo", req.Git)
-		writeJSON(w, m)
+		writeJSON(w, installResp{appManifest: m, DeferredPermissions: deferred})
 		return
 	}
 
@@ -527,16 +521,73 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, st, err)
 			return
 		}
-		a.installAndGrantZip(w, data)
+		a.installAndGrantZip(w, data, req.Consent)
 		return
 	}
 
 	writeErr(w, http.StatusBadRequest, errors.New("缺少应用包文件、下载地址或 Git 仓库地址"))
 }
 
-// installAndGrantZip 解包安装内存中的 .qxp，并补做安装后置：授予清单声明的权限、
+// installResp 在安装结果（manifest）之外附带被延迟授予的高危权限清单，
+// 供前端提示用户「这些权限将在应用运行时逐项请求」（QX-010）。
+type installResp struct {
+	appManifest
+	DeferredPermissions []string `json:"deferredPermissions,omitempty"`
+}
+
+// grantOnInstall 按安装同意授予 manifest 声明的权限（QX-010）：
+// 低危（Danger≤1）随安装授予；高危（Danger≥2）仅授予 consent 中确认过的项，
+// 其余返回给调用方延迟处理（应用运行时经权限弹窗逐项请求）。
+func (a *Gateway) grantOnInstall(m appManifest, consent []string) (granted, deferred []string) {
+	consented := make(map[string]bool, len(consent))
+	for _, p := range consent {
+		if n := PermNormalize(p); n != "" {
+			consented[n] = true
+		}
+	}
+	for _, p := range m.Permissions {
+		n := PermNormalize(p)
+		if n == "" {
+			continue
+		}
+		danger := 0
+		if def, ok := permByID[n]; ok {
+			danger = def.Danger
+		}
+		if danger >= 2 && !consented[n] {
+			deferred = append(deferred, n)
+			continue
+		}
+		granted = append(granted, n)
+	}
+	if len(granted) > 0 {
+		if err := a.store.Grant(m.ID, granted); err != nil {
+			a.log.Warn("grant manifest permissions failed", "id", m.ID, "err", err.Error())
+			return nil, append(deferred, granted...)
+		}
+		a.audit.record(auditEntry{
+			AppID:  m.ID,
+			Type:   auditPermGrant,
+			Target: "apps/install",
+			Detail: strings.Join(granted, ","),
+			Result: "ok",
+		})
+	}
+	if len(deferred) > 0 {
+		a.audit.record(auditEntry{
+			AppID:  m.ID,
+			Type:   auditPermGrant,
+			Target: "apps/install",
+			Detail: strings.Join(deferred, ","),
+			Result: "deferred",
+		})
+	}
+	return granted, deferred
+}
+
+// installAndGrantZip 解包安装内存中的 .qxp，并补做安装后置：按同意授予权限、
 // 写权限审计与应用安装日志。供上传与下载两条路径共用，两者唯一的差别是字节来源。
-func (a *Gateway) installAndGrantZip(w http.ResponseWriter, data []byte) {
+func (a *Gateway) installAndGrantZip(w http.ResponseWriter, data []byte, consent []string) {
 	m, err := a.installAppZip(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -550,21 +601,9 @@ func (a *Gateway) installAndGrantZip(w http.ResponseWriter, data []byte) {
 		a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
 	}
 
-	if len(m.Permissions) > 0 {
-		if err := a.store.Grant(m.ID, m.Permissions); err != nil {
-			a.log.Warn("grant manifest permissions failed", "id", m.ID, "err", err.Error())
-		} else {
-			a.audit.record(auditEntry{
-				AppID:  m.ID,
-				Type:   auditPermGrant,
-				Target: "apps/install",
-				Detail: strings.Join(m.Permissions, ","),
-				Result: "ok",
-			})
-		}
-	}
+	_, deferred := a.grantOnInstall(m, consent)
 	a.log.Info("app installed", "id", m.ID, "name", m.Name.Get(defaultLang), "version", m.Version)
-	writeJSON(w, m)
+	writeJSON(w, installResp{appManifest: m, DeferredPermissions: deferred})
 }
 
 // handleValidateApp 只校验不安装，与 handleInstallApp 同构地按三种载荷分流：
