@@ -545,7 +545,8 @@ func (a *Gateway) handleSftpRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 func removeRecursive(sc *sftp.Client, p string) error {
-	fi, err := sc.Stat(p)
+	// Lstat 不跟随符号链接（QX-038）：删除链接本身而非其目标内容。
+	fi, err := sc.Lstat(p)
 	if err != nil {
 		return err
 	}
@@ -695,7 +696,26 @@ func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client,
 	}
 }
 
+// sftpUploadMax 是单次上传的硬上限（QX-037）。
+const sftpUploadMax = 512 << 20
+
+// sftpCopyMaxDepth 限制复制递归深度：copyPath 经 Stat/Open 跟随符号链接，
+// 链接环或自嵌套会导致无限递归（QX-038）。
+const sftpCopyMaxDepth = 64
+
+// sftpNesting 报告目标是否等于源或位于源内部（自嵌套复制会无限递归）。
+func sftpNesting(from, to string) bool {
+	return to == from || strings.HasPrefix(to, from+"/")
+}
+
 func copyPath(sc *sftp.Client, from, to string) error {
+	return copyPathDepth(sc, from, to, 0)
+}
+
+func copyPathDepth(sc *sftp.Client, from, to string, depth int) error {
+	if depth > sftpCopyMaxDepth {
+		return errors.New("复制递归过深（疑似符号链接环或自嵌套），已中止")
+	}
 	fi, err := sc.Stat(from)
 	if err != nil {
 		return err
@@ -709,7 +729,7 @@ func copyPath(sc *sftp.Client, from, to string) error {
 			return err
 		}
 		for _, e := range entries {
-			if err := copyPath(sc, path.Join(from, e.Name()), path.Join(to, e.Name())); err != nil {
+			if err := copyPathDepth(sc, path.Join(from, e.Name()), path.Join(to, e.Name()), depth+1); err != nil {
 				return err
 			}
 		}
@@ -736,7 +756,12 @@ func (a *Gateway) handleSftpCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	if err := copyPath(sc, cleanPath(req.From), cleanPath(req.To)); err != nil {
+	from, to := cleanPath(req.From), cleanPath(req.To)
+	if sftpNesting(from, to) {
+		writeOpErr(w, errors.New("目标不能等于源或位于源内部（自嵌套复制会无限递归）"))
+		return
+	}
+	if err := copyPath(sc, from, to); err != nil {
 		writeOpErr(w, err)
 		return
 	}
@@ -751,6 +776,10 @@ func (a *Gateway) handleSftpMove(w http.ResponseWriter, r *http.Request) {
 	}
 	defer done()
 	from, to := cleanPath(req.From), cleanPath(req.To)
+	if sftpNesting(from, to) {
+		writeOpErr(w, errors.New("目标不能等于源或位于源内部（自嵌套移动会无限递归）"))
+		return
+	}
 	if err := sc.Rename(from, to); err == nil {
 		writeJSON(w, okResp{OK: true})
 		return
@@ -769,6 +798,9 @@ func (a *Gateway) handleSftpMove(w http.ResponseWriter, r *http.Request) {
 func (a *Gateway) handleSftpUpload(w http.ResponseWriter, r *http.Request) {
 	hostID := r.URL.Query().Get("host")
 	dest := cleanPath(r.URL.Query().Get("path"))
+	// 上传总量限制（QX-037）：ParseMultipartForm 的 64MB 只是内存阈值，
+	// 超出部分会落宿主临时盘；这里对请求体与远端写入都设硬上限。
+	r.Body = http.MaxBytesReader(w, r.Body, sftpUploadMax+(1<<20))
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeOpErr(w, err)
 		return
@@ -803,7 +835,12 @@ func (a *Gateway) handleSftpUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
+	n, err := io.Copy(dst, io.LimitReader(file, sftpUploadMax+1))
+	if err == nil && n > sftpUploadMax {
+		err = fmt.Errorf("上传文件过大（上限 %d MB）", sftpUploadMax>>20)
+	}
+	if err != nil {
+		_ = sc.Remove(target)
 		writeOpErr(w, err)
 		return
 	}
