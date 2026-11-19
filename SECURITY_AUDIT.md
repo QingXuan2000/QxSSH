@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 4 轮，P0 全部完成）
+### 已修复（截至 2026-11-19 第 5 轮，P0 全部完成，P1 过半）
 
 **第 1 轮**
 
@@ -502,6 +502,19 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 **协议变更注记（QX-015）**：第三方应用自身资源用相对路径不受影响；宿主桌面/store 经 apps/list 自动取令牌。旧格式 URL（无令牌段）一律 404。内置应用走 `/apps/` 嵌入路由不受影响。
 
+**第 5 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-036（Medium） | localfs 全操作（list/read/write/delete/mkdir/rename 含 rename 目标）拒绝配置目录内路径（凭据库/密钥/应用代码/审计）；符号链接解析 + Windows 大小写折叠防绕过 | f7fd93c |
+| QX-065（Low） | localfs/write 改临时文件 + 原子替换：超限/失败不再先截断毁掉原文件 | f7fd93c |
+| QX-017（High） | remote 隧道 bind 与 local/dynamic 一致默认仅回环，杜绝把宿主侧服务裸暴露到远端网段 | f7fd93c |
+| QX-016（High，部分） | webproxy 监听校验 Host 仅回环（抗 rebinding）；包文档同步。残留：本机进程仍可直接使用代理（与网关回环信任边界一致），能力路径前缀为后续项；XFO/CSP 剥离与 Cookie 串扰维持现状（浏览器应用功能依赖，需独立设计） | 5af8de4 |
+| QX-035（Medium） | 两处 Transport 移除 InsecureSkipVerify（上游证书正常校验，自签名上游将失败——安全默认）；Start 目标与 probeUpgrade 重定向枢轴禁止链路本地/云元数据字面量地址 | 5af8de4 |
+| QX-064（Low，部分） | webproxy http.Server 补 ReadHeaderTimeout/IdleTimeout（网关侧待补） | 5af8de4 |
+| QX-023（Medium） | data.db/-wal/-shm 显式 chmod 0600；配置目录显式 chmod 0700（MkdirAll 不修正已存在目录）。Windows ACL 加固为后续项 | 829e387 |
+| QX-024（Medium） | 刷新令牌以 SHA-256 哈希落库（Save/Get/Revoke/Rotate 边界转换）；GetRefresh 对旧明文行懒迁移；读库不再等于可用凭据 | 829e387 |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -509,11 +522,11 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - 语义层面的"空实现"：QX-074（encrypt/decrypt 失败静默返回空串）列入后续修复，以错误传播替代。
 - 本轮已删除被替代的死代码：`redactSessionInQuery`（功能并入 sanitizeAuditQuery）。
 
-### 待修复（后续轮次，P0 已全部完成）
+### 待修复（后续轮次）
 
-- P1 高优先：QX-004（主密钥移出 data.db）、QX-016（webproxy 鉴权与安全头）、QX-017（remote 隧道地址策略）、QX-035（代理目标过滤）、QX-036（localfs 自保护）
-- P1 其余：QX-023/024（db 权限/refresh 哈希）、QX-021（首信指纹确认）、QX-026（按主机授权）、QX-030（job 归属）、QX-034（WS 超时）、QX-037/038（上传/递归限制）、QX-043（git 缓存）等
-- P2：其余 Low/Info 逐项
+- High 仅剩：QX-004（主密钥移出 data.db / OS 密钥链 / 口令派生——需独立设计轮）
+- P1 其余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-029（refresh 轮换原子性）、QX-030（job 归属）、QX-031/032（审计缺口/归属）、QX-033（sudo 回显）、QX-034（WS 超时）、QX-037/038（SFTP 上传/递归）、QX-039/040（审计反取证）、QX-041（zip 炸弹）、QX-043（git 缓存）、QX-044/045/048/049（前端沙箱/渲染/SDK）
+- P2：其余 Low/Info 逐项（QX-016 残留、QX-064 网关侧等）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
