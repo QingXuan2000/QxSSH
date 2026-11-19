@@ -12,6 +12,31 @@ import (
 
 const sudoCredTTL = 30 * time.Minute
 
+// sudo 密码尝试限速（QX-069）：每主机 60 秒内最多 5 次，防在线爆破。
+const (
+	sudoAttemptWindow = 60 * time.Second
+	sudoAttemptMax    = 5
+)
+
+func (a *Gateway) sudoAuthAllowed(host string) bool {
+	a.sudoMu.Lock()
+	defer a.sudoMu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-sudoAttemptWindow)
+	kept := a.sudoAttempts[host][:0]
+	for _, t := range a.sudoAttempts[host] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= sudoAttemptMax {
+		a.sudoAttempts[host] = kept
+		return false
+	}
+	a.sudoAttempts[host] = append(kept, now)
+	return true
+}
+
 type sudoCred struct {
 	pw string
 	at time.Time
@@ -94,6 +119,11 @@ func (a *Gateway) handleSudoAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.ContainsAny(req.Password, "\r\n") {
 		writeErr(w, http.StatusBadRequest, errors.New("密码不能包含换行符"))
+		return
+	}
+	// 仅对真实密码尝试限速；无密码探测不计入（QX-069）。
+	if req.Password != "" && !a.sudoAuthAllowed(req.Host) {
+		writeErr(w, http.StatusTooManyRequests, errors.New("sudo 密码尝试过于频繁，请稍后再试"))
 		return
 	}
 	client, err := a.mgr.Get(req.Host)

@@ -36,7 +36,6 @@ type Options struct {
 	// UDP 打开动态转发的 SOCKS5 UDP ASSOCIATE（CMD=3）：浏览器把 UDP 数据报直接交给
 	// 代理，由这条动态转发经 SSH 中继出去。只有 Type=dynamic 时有效。
 	UDP bool `json:"udp"`
-
 }
 
 // Running 描述一条正在运行的端口转发。cancel 用于内部停止该转发的监听循环。
@@ -53,9 +52,9 @@ type Running struct {
 	Proxy  string `json:"proxy,omitempty"`
 	// Agent / AgentPort 只对 UDP 转发有意义：远端临时目录里的中继文件路径，
 	// 以及它绑在远端回环上的 TCP 端口（本机的 datagram 都从这条通道进去）。
-	Agent     string `json:"agent,omitempty"`
-	AgentPort int    `json:"agentPort,omitempty"`
-	StartedAt    time.Time `json:"startedAt"`
+	Agent     string    `json:"agent,omitempty"`
+	AgentPort int       `json:"agentPort,omitempty"`
+	StartedAt time.Time `json:"startedAt"`
 
 	cancel func()
 }

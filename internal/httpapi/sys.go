@@ -523,7 +523,11 @@ func (a *Gateway) handlePermRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	// 撤销权限要「立即」生效：递增令牌世代，旧令牌当场失效，
 	// 应用下次换发的令牌自然不再携带被撤销的 scope。
-	a.invalidateAppTokens(req.App)
+	// 世代递增失败时如实报错（QX-061），不返回「已撤销」的假象。
+	if err := a.invalidateAppTokens(req.App); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("权限已撤销但令牌世代递增失败，旧令牌可能仍有效：%w", err))
+		return
+	}
 	a.log.Info("app permission revoked", "app", req.App, "count", len(req.Perms))
 	a.audit.record(auditEntry{
 		AppID:  req.App,
@@ -564,8 +568,11 @@ func (a *Gateway) handlePermClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("app permissions cleared", "app", req.App)
-	// 清空授权是破坏性操作：立即整体撤销该应用的令牌。
-	a.invalidateAppTokens(req.App)
+	// 清空授权是破坏性操作：立即整体撤销该应用的令牌；失败如实报错（QX-061）。
+	if err := a.invalidateAppTokens(req.App); err != nil {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("授权已清空但令牌撤销失败，旧令牌可能仍有效：%w", err))
+		return
+	}
 	a.audit.record(auditEntry{
 		AppID:  req.App,
 		HostID: permReqHost(req.Host),

@@ -75,7 +75,7 @@ func (a *Gateway) handleExecRun(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, errors.New("后台执行仅支持本机（host 留空）"))
 			return
 		}
-		res, err := a.startBackground(spec.Argv, spec.Cwd, spec.Elevated)
+		res, err := a.startBackground(spec.Argv, spec.Cwd, spec.Elevated, callerApp(r))
 		if err != nil {
 			writeOpErr(w, err)
 			return
@@ -144,6 +144,10 @@ func (a *Gateway) handleExecStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, execGoneResp{Gone: true, Running: false})
 		return
 	}
+	if !a.bgOwned(r, p) {
+		writeErr(w, http.StatusForbidden, errors.New("不能操作其他应用的后台进程"))
+		return
+	}
 	writeJSON(w, p.snapshot())
 }
 
@@ -165,6 +169,10 @@ func (a *Gateway) handleExecKill(w http.ResponseWriter, r *http.Request) {
 	p := a.lookupBackground(req.ID)
 	if p == nil {
 		writeJSON(w, execKillResp{OK: true, Gone: true})
+		return
+	}
+	if !a.bgOwned(r, p) {
+		writeErr(w, http.StatusForbidden, errors.New("不能操作其他应用的后台进程"))
 		return
 	}
 	a.dropBackground(req.ID)
@@ -527,6 +535,8 @@ type bgProc struct {
 	PID     int
 	Argv    []string
 	Started time.Time
+	// App 是发起应用（宿主为空）：status/kill 按归属校验（QX-067）。
+	App string
 
 	mu       sync.Mutex
 	buf      bytes.Buffer
@@ -582,7 +592,7 @@ func (p *bgProc) kill() {
 	}
 }
 
-func (a *Gateway) startBackground(argv []string, cwd string, elevated bool) (bgStartResp, error) {
+func (a *Gateway) startBackground(argv []string, cwd string, elevated bool, app string) (bgStartResp, error) {
 	a.bgMu.Lock()
 	running := 0
 	for _, p := range a.bgProcs {
@@ -602,7 +612,7 @@ func (a *Gateway) startBackground(argv []string, cwd string, elevated bool) (bgS
 
 	cmd := execLocalCmd(context.Background(), argv, elevated)
 	cmd.Dir = cwd
-	p := &bgProc{ID: id, Argv: argv, Started: time.Now(), done: make(chan struct{})}
+	p := &bgProc{ID: id, Argv: argv, Started: time.Now(), App: app, done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = p, p
 	if err := cmd.Start(); err != nil {
 		return bgStartResp{}, err
@@ -631,9 +641,16 @@ func (a *Gateway) startBackground(argv []string, cwd string, elevated bool) (bgS
 	case <-p.done:
 		return bgStartResp{OK: p.exit == 0, bgSnapshot: p.snapshot()}, nil
 	case <-time.After(execGracePeriod):
-		a.log.Info("background exec started", "id", id, "pid", p.PID, "argv", strings.Join(argv, " "))
+		// 完整 argv 可能含敏感参数（-pSECRET 等），Info 级只记 argv0 与参数个数（QX-050）。
+		a.log.Info("background exec started", "id", id, "pid", p.PID, "argv0", argv[0], "argc", len(argv))
 		return bgStartResp{OK: true, bgSnapshot: bgSnapshot{ID: id, PID: p.PID, Running: true}}, nil
 	}
+}
+
+// bgOwned 校验调用者是后台进程的发起应用或宿主（QX-067）。
+func (a *Gateway) bgOwned(r *http.Request, p *bgProc) bool {
+	caller := callerApp(r)
+	return caller == hostApp || (p.App != "" && caller == p.App)
 }
 
 func (a *Gateway) lookupBackground(id string) *bgProc {

@@ -31,6 +31,12 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeJSONNoStore 用于含凭据/令牌的响应：显式禁止任何缓存（QX-051）。
+func writeJSONNoStore(w http.ResponseWriter, v any) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, v)
+}
+
 func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

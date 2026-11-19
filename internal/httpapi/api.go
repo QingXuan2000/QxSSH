@@ -41,6 +41,8 @@ type Gateway struct {
 
 	sudoMu    sync.Mutex
 	sudoCreds map[string]sudoCred
+	// sudoAttempts 是 sudo 密码尝试的限速窗口（每主机，QX-069）。
+	sudoAttempts map[string][]time.Time
 
 	sysTable map[string]*sysEntry
 	hostTok  string
@@ -100,6 +102,7 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.sysTable = map[string]*sysEntry{}
 	a.hostTok = randTok()
 	a.deny = map[string]int64{}
+	a.sudoAttempts = map[string][]time.Time{}
 	a.bgProcs = map[string]*bgProc{}
 	a.jobOwn = map[string]string{}
 	a.wsSlots = make(chan struct{}, wsMaxSessions)

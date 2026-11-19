@@ -24,7 +24,7 @@ func (a *Gateway) handleSecretGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, ok := a.store.SecretGet(callerApp(r), key)
-	writeJSON(w, secretGetResp{Key: key, Value: v, Found: ok})
+	writeJSONNoStore(w, secretGetResp{Key: key, Value: v, Found: ok})
 }
 
 func (a *Gateway) handleSecretSet(w http.ResponseWriter, r *http.Request) {

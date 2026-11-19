@@ -730,19 +730,26 @@ func (a *Gateway) pruneIDPDeny(now int64) {
 }
 
 // invalidateAppTokens 递增应用令牌世代（旧访问 JWT 立即失效）并作废其全部刷新令牌。
-// 不需要保存任何令牌内容。
-func (a *Gateway) invalidateAppTokens(app string) {
+// 不需要保存任何令牌内容。失败返回 error（QX-061）：权限撤销路径必须把
+// 「撤销可能未生效」如实报告给调用方，而不是返回 OK。
+func (a *Gateway) invalidateAppTokens(app string) error {
+	var firstErr error
 	if _, err := a.store.BumpAppTokenEpoch(app); err != nil {
 		a.log.Warn("bump app token epoch failed", "app", app, "error", err.Error())
+		firstErr = err
 	}
 	if err := a.store.RevokeRefreshForApp(app); err != nil {
 		a.log.Warn("revoke app refresh tokens failed", "app", app, "error", err.Error())
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
+	return firstErr
 }
 
 // revokeAppTokens 在 invalidateAppTokens 的基础上补一条审计记录。
 func (a *Gateway) revokeAppTokens(app, reason string) {
-	a.invalidateAppTokens(app)
+	_ = a.invalidateAppTokens(app)
 	a.log.Info("app tokens revoked", "app", app, "reason", reason)
 	a.audit.record(auditEntry{
 		AppID:  app,
@@ -760,6 +767,10 @@ func (a *Gateway) revokeToken(token string) {
 	}
 	if c, err := a.idp.verify(token, time.Now()); err == nil && c != nil {
 		a.revokeIDPJTI(c.ID, c.ExpiresAt)
+		// 同步吊销配套刷新令牌（QX-054）：否则可立即 refresh 换发复活。
+		if err := a.store.RevokeRefreshByJTI(c.ID); err != nil {
+			a.log.Warn("revoke paired refresh token failed", "error", err.Error())
+		}
 		a.audit.record(auditEntry{
 			AppID:  c.Subject,
 			Type:   auditSessionRevoke,
@@ -818,7 +829,7 @@ func (a *Gateway) handleSessionMint(w http.ResponseWriter, r *http.Request) {
 		Target: "session/mint",
 		Result: "ok",
 	})
-	writeJSON(w, sess.mintResp())
+	writeJSONNoStore(w, sess.mintResp())
 }
 
 // trimSessions 把活跃刷新会话收在 maxSessions 条以内。
@@ -914,7 +925,7 @@ func (a *Gateway) handleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 		Target: "session/refresh",
 		Result: "rotated",
 	})
-	writeJSON(w, sess.mintResp())
+	writeJSONNoStore(w, sess.mintResp())
 }
 
 // handleSessionRevoke 支持两种粒度：

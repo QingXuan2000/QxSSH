@@ -1373,6 +1373,18 @@ func (s *Store) RevokeRefreshToken(token string) error {
 	return err
 }
 
+// RevokeRefreshByJTI 按配套访问令牌的 jti 吊销刷新令牌（QX-054）：
+// 吊销单枚访问 JWT 时同步作废其刷新令牌，防止立即换发复活。
+func (s *Store) RevokeRefreshByJTI(jti string) error {
+	if jti == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE app_refresh SET revoked = 1 WHERE jti = ?`, jti)
+	return err
+}
+
 // ErrRefreshReused 表示轮换时旧令牌已被吊销（并发重用或重放，QX-029）。
 // 调用方应据此触发「重用即泄露」的整体撤销。
 var ErrRefreshReused = errors.New("刷新令牌已被轮换")

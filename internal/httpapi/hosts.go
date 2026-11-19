@@ -269,7 +269,7 @@ func (a *Gateway) handleHostCredential(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errors.New("该主机未设置"+label))
 		return
 	}
-	writeJSON(w, hostCredentialResp{ID: h.ID, Kind: req.Kind, Value: value})
+	writeJSONNoStore(w, hostCredentialResp{ID: h.ID, Kind: req.Kind, Value: value})
 }
 
 func (a *Gateway) handlePreconnectHost(w http.ResponseWriter, r *http.Request) {
