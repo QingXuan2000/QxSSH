@@ -117,6 +117,7 @@ go build -o qxssh.exe .
 | `-log-level` | `QXSSH_LOG_LEVEL` | `info` | 日志过滤级别：`debug` / `info` / `warn` / `error` / `silent` |
 | `-log-file` | `QXSSH_LOG_FILE` | 留空（仅输出到控制台） | 日志输出路径；设为 `auto` 则写入 `<配置目录>/logs/qxssh.log` |
 | `-auth-token` | `QXSSH_AUTH_TOKEN` | 留空（仅允许回环地址） | 外部访问全局鉴权令牌；非回环监听时为强制必填项 |
+| — | `QXSSH_MASTER_PASSPHRASE` | 留空 | 主密钥口令：设置后 `master.key` 以 Argon2id 派生密钥包裹，启动时需同一口令解包（错误口令拒绝启动）；对已有裸密钥文件自动升级包裹 |
 
 ---
 
@@ -144,17 +145,17 @@ QxSSH 具备执行任意系统命令、管理远程文件与操作敏感凭据�
 2. **全局访问令牌与常量时间比较**：
    启用鉴权令牌后，所有外部 HTTP / WebSocket 请求必须携带 `Authorization: Bearer <token>`、URL 参数 `?token=` 或 `qx_token` Cookie。服务端使用 `crypto/subtle.ConstantTimeCompare` 进行防时序攻击比较；使用 `?token=` 初次登录成功后，会自动写入 `HttpOnly`、`SameSite=Strict` 的安全 Cookie。
 3. **宿主与应用双层会话隔离**：
-   宿主界面（`index.html` 与 `desktop.html`）在服务端渲染时通过 `crypto/rand` 随机生成并注入一次性宿主令牌（Host Token）。第三方应用运行于 `iframe` 沙箱中，无法接触宿主令牌；应用必须由宿主通过 `POST /api/v1/session/mint` 端点为其铸造独立的会话访问令牌（Access Token），该令牌绑定应用身份并签名受限 Scope。活跃刷新会话上限 256 条（`app_refresh` 中未吊销未过期的行），每次签发与轮换都会按 `last_use` 淘汰最旧的超额会话，避免刷新令牌表无界增长；被淘汰后旧访问令牌仍按自身 `exp` 走完，不会掐断正在进行的请求。
+   宿主界面（`index.html` 与 `desktop.html`）仅在**可信 Host 的顶层文档导航**（`Sec-Fetch-Mode: navigate` 且 `Sec-Fetch-Dest: document`）时注入每次启动随机生成的宿主令牌（Host Token）；免鉴权回环部署下 Host 头白名单拒绝 DNS rebinding。第三方应用运行于 `iframe` 沙箱中，无法接触宿主令牌；应用会话令牌由宿主经 `POST /api/v1/session/mint` 铸造，绑定应用身份与受限 Scope，且仅在应用以每帧握手密钥完成 `ready` 握手后投递（iframe load 不再无条件推送）。活跃刷新会话上限 256 条，刷新令牌以 SHA-256 哈希落库并轮换，重用即整体撤销。
 4. **零默认权限原则（Zero Default Permissions）**：
-   系统定义了 15 个分组共 95 项细粒度权限（Scope）。所有权限项默认均为 `false`（无放行权限）。第三方应用访问私有存储、读写机密或调用任何系统 API，都必须在 `manifest.json` 中明确声明，并在安装或运行时获得用户显式授权。宿主与内置系统应用拥有全量权限。
-5. **凭据静态加密（AES-256-GCM）**：
-   所有远程主机密码、私钥内容、私钥密码短语以及应用私有机密，在 SQLite 数据库中均通过 AES-256-GCM 算法加密存储。主密钥在首次运行时由加密安全随机数生成并存入数据库 `meta` 表中。
+   系统定义了 15 个分组共 95 项细粒度权限（Scope）。所有权限项默认均为 `false`（无放行权限）。第三方应用访问私有存储、读写机密或调用任何系统 API，都必须在 `manifest.json` 中明确声明；安装时低危权限随安装授予，**高危权限（Danger≥2）仅授予安装确认页逐项确认过的项**，其余延迟到运行时经权限弹窗请求。宿主拥有全量权限；内置应用按 manifest 声明最小授权。
+5. **主密钥与凭据库分离**：
+   主机凭据与应用机密以 AES-256-GCM 加密存于 `data.db`；主密钥独立存于配置目录 `master.key`（0600），单独泄露数据库文件不再等于凭据泄露。设置 `QXSSH_MASTER_PASSPHRASE` 后主密钥以 Argon2id 派生密钥包裹，口令错误拒绝启动。
 6. **首次信任主机公钥校验（TOFU 机制）**：
-   首次连接某远程主机时，系统会自动记录其主机公钥指纹至 `<配置目录>/known_hosts` 文件中（标准 OpenSSH 格式）。若后续连接发现远端公钥指纹变动，连接将被强制中断并向用户告警，有效抵御中间人攻击（MITM）。
+   首次连接某远程主机时，系统会自动记录其主机公钥指纹至 `<配置目录>/known_hosts` 文件中（标准 OpenSSH 格式）。信任以主机地址为键：后续连接中任何未记录的公钥——无论同算法换指纹还是更换算法——都会强制中断并告警，抵御中间人攻击（MITM）；已知主机优先提议已记录的密钥算法。首次信任目前为静默 TOFU（指纹确认交互在路线图中）。
 7. **出向网络与路径收敛**：
-   本地端口转发与动态 SOCKS5 代理的监听端口强制限定于本机回环地址（`127.0.0.1` / `::1`）；所有本地与远程文件操作均执行严格的路径穿越（`..`）校验与规范化处理，阻断符号链接逃逸。
-8. **安全响应头与同源校验**：
-   服务端全局默认注入 `X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、`Referrer-Policy: no-referrer`；WebSocket 建立连接时严格核对 Origin 同源标头。
+   本地、远程端口转发与动态 SOCKS5 代理的监听地址一律限定回环（`127.0.0.1` / `::1`）；所有本地与远程文件操作均执行严格的路径穿越（`..`）校验与规范化处理，阻断符号链接逃逸；本地文件接口禁止访问配置目录（凭据库/密钥/应用代码自保护）。
+8. **安全响应头与来源校验**：
+   服务端全局默认注入 `X-Content-Type-Options: nosniff`、`X-Frame-Options: SAMEORIGIN`、`Referrer-Policy: no-referrer`；免鉴权回环部署下 Host 头白名单拒绝 DNS rebinding；WebSocket 核对 Origin 并以会话令牌逐次鉴权，连接带保活与读写超时。
 
 ---
 
