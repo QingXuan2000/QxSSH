@@ -441,7 +441,9 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 1 轮）
+### 已修复（截至 2026-11-19 第 2 轮）
+
+**第 1 轮**
 
 | 发现 | 修复内容 | 提交 |
 |---|---|---|
@@ -462,6 +464,25 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-047 | injectSession 增加 Sec-Fetch-Dest=document 条件 | 0112833 |
 | 注释修正 | apps.go 白名单注释与实现一致、idp.go 归档注释、main.go 轮换提示、hosts.go test 文档 | 1be0891 |
 
+**第 2 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| **QX-003（Critical）** | 每帧握手密钥经 URL fragment 下发；init/令牌仅在携带密钥的 ready 握手后投递；移除 iframe load 无条件推送（被动导航不再收到令牌）；两处重载路径重置 ready 允许重新握手 | 996d42f |
+| QX-027 | workspace.info 桥方法要求 hosts:read | 996d42f |
+| QX-046 | set-pref 要求 ui:settings | 996d42f |
+| QX-060 | perm-changed/session-revoked-notify 跨应用目标仅限内置应用；apps.reload 仅限内置 | 996d42f |
+| QX-020 | known_hosts 信任改为按主机地址的密钥集合；任何未记录公钥（含换算法）一律拒绝；已知主机优先提议已记录算法防误拒；告警区分新旧算法 | d35a87d |
+| QX-022 | 显式现代 KEX/Ciphers/MACs/HostKeyAlgorithms 白名单（剔除 SHA-1 KEX/MAC、ssh-rsa/ssh-dss 新主机） | d35a87d |
+| QX-052 | known_hosts 随机后缀临时文件 + 原子改名 | d35a87d |
+| QX-074 | encrypt/decrypt 返回 error 并向上传播（Create/UpdateHost、SecretSet）；GetHost/SecretGet 解密失败经 SetWarnFn 钩子接入日志——消除语义层面的"空实现"错误路径 | a1d3c5c |
+| QX-042 | git 协议白名单仅 https + ssh（禁 http/git:///file://） | 284f25f |
+| QX-014 | 应用包下载强制 https；重定向 ≤5 跳且目标必须 https | 284f25f |
+| QX-070 | cleanGitBranch 控制字符按范围判断（原 ContainsAny 字面集漏检）+ 禁反斜杠 | 284f25f |
+| 注释修正 | appframe.js post() 安全模型注释、appgit.go 传输协议注释、downloadAppZip/cleanGitURL 文档 | 996d42f/284f25f |
+
+**QX-003 残留注记**：用户点击授权弹窗"允许"后的令牌推送与 perm-changed 重签推送仍以帧当前文档为目标（需用户交互或恶意代码主动触发，且恶意代码本可直接外带自有令牌）；根本收敛依赖 QX-019 内置应用最小 scope（进行中，scope-audit 盘点实际权限需求）。第三方应用协议变更：不再无条件收到 init，须使用 app-bridge SDK 的带密钥 ready 握手（示例应用已自动适配）。
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -471,8 +492,9 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 ### 待修复（后续轮次）
 
-- P0 前端/协同：QX-003（桥令牌主动握手）、QX-010（安装权限逐项同意）、QX-015 完整（apps/file 鉴权）、QX-019（内置应用最小 scope）、QX-027/046/060（桥方法权限）
-- P1：QX-004/023/024（密钥管理）、QX-020/021/022（主机键与算法）、QX-016/017/035（代理与隧道）、QX-036（localfs 自保护）、QX-014/042/043（下载与 git 源）、QX-074（错误传播）等
+- P0 协同：QX-010（安装权限逐项同意）、QX-015 完整（apps/file 鉴权）、QX-019（内置应用最小 scope，scope-audit 盘点中）
+- P1：QX-004/023/024（密钥管理）、QX-021（首信指纹确认交互）、QX-016/017/035（代理与隧道）、QX-036（localfs 自保护）、QX-043（git 缓存投毒）、QX-026（按主机授权）、QX-030（job 归属）等
+- P2：其余 Low/Info 逐项
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
