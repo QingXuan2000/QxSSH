@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 2 轮）
+### 已修复（截至 2026-11-19 第 3 轮）
 
 **第 1 轮**
 
@@ -481,7 +481,17 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-070 | cleanGitBranch 控制字符按范围判断（原 ContainsAny 字面集漏检）+ 禁反斜杠 | 284f25f |
 | 注释修正 | appframe.js post() 安全模型注释、appgit.go 传输协议注释、downloadAppZip/cleanGitURL 文档 | 996d42f/284f25f |
 
-**QX-003 残留注记**：用户点击授权弹窗"允许"后的令牌推送与 perm-changed 重签推送仍以帧当前文档为目标（需用户交互或恶意代码主动触发，且恶意代码本可直接外带自有令牌）；根本收敛依赖 QX-019 内置应用最小 scope（进行中，scope-audit 盘点实际权限需求）。第三方应用协议变更：不再无条件收到 init，须使用 app-bridge SDK 的带密钥 ready 握手（示例应用已自动适配）。
+**QX-003 残留注记**：用户点击授权弹窗"允许"后的令牌推送与 perm-changed 重签推送仍以帧当前文档为目标（需用户交互或恶意代码主动触发，且恶意代码本可直接外带自有令牌）；根本收敛依赖 QX-019 内置应用最小 scope（已于第 3 轮完成）。第三方应用协议变更：不再无条件收到 init，须使用 app-bridge SDK 的带密钥 ready 握手（示例应用已自动适配）。
+
+**第 3 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| **QX-019（High）** | 内置应用最小权限化三处同改：appScope 按 manifest 声明签发（不再全量 permIDs）；permAllowed 对内置应用按声明集判定；桥 requirePermission/api-call/跨应用分派取消 system  blanket 豁免改查 manifest。11 个 manifest 依据逐调用点盘点（audit-work/builtin-scopes.md）补齐缺失键（files 的 sudo、taskmon/systemd 的 local:exec、hosts 的 forgetos、browser/tunnels 的 preconnect、prefs:self 读写对等），移除 browser exec:run/local:read 与 hosts hosts:credential 三个危险冗余键 | 5f1e720 |
+| **QX-010（High）** | 安装同意门禁：grantOnInstall 按 Danger 分级——≤1 随安装授予，≥2 仅授予用户确认页展示的 consent 清单内的项，其余延迟到运行时逐项弹窗请求并返回 deferredPermissions 提示；store 四条安装路径接线 consent；desktop 快捷安装无 consent → 高危自动延迟（安全默认）；审计记录 granted/deferred | 4965c15 |
+| 注释修正 | handleInstallApp 文档不再称"声明即预授权"；appScope 注释同步 | 4965c15/5f1e720 |
+
+**QX-019 保守决策注记**：仅移除三个最危险冗余键，其余盘点出的冗余键（多为 Danger 1）暂保留——无运行时 UI 测试条件，避免静默功能回归；后续可经运行时验证再收紧。systemd 补 local:exec 覆盖空主机边缘路径。
 
 ### 空实现盘点结论
 
@@ -492,7 +502,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 ### 待修复（后续轮次）
 
-- P0 协同：QX-010（安装权限逐项同意）、QX-015 完整（apps/file 鉴权）、QX-019（内置应用最小 scope，scope-audit 盘点中）
+- P0 收尾：QX-015 完整（apps/file 鉴权，需与前端加载协议协同）
 - P1：QX-004/023/024（密钥管理）、QX-021（首信指纹确认交互）、QX-016/017/035（代理与隧道）、QX-036（localfs 自保护）、QX-043（git 缓存投毒）、QX-026（按主机授权）、QX-030（job 归属）等
 - P2：其余 Low/Info 逐项
 
