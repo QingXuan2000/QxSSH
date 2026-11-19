@@ -3,13 +3,14 @@
 // 它经一条已有的 SSH 通道，把远端内网的 HTTP(S) 服务反向代理到本机的
 // 127.0.0.1:<随机端口>，并改写响应以适配浏览器：去除 X-Frame-Options/CSP、
 // 放宽 Cookie 属性、跟随跨主机重定向，并抹掉正文中的上游 origin 字符串。
+// 安全边界：监听仅回环且校验 Host 头（抗 DNS rebinding）；上游 TLS 正常
+// 校验证书；目标与重定向禁止链路本地/云元数据地址。
 // Registry 负责代理实例的启动、停止、列举，以及主机失效时停止其全部代理。
 package proxy
 
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -277,12 +278,17 @@ func (m *Registry) List() []Instance {
 
 // Start 在 hostID 对应的 SSH 通道上，为远端 target（host:port）建立一个
 // 反向代理实例并返回它。useTLS 决定以 https 还是 http 访问上游。
+// 目标禁止链路本地/云元数据字面量地址（QX-035）；上游 TLS 正常校验证书。
 func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, useTLS bool) (*Instance, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("webproxy: ssh client is nil")
 	}
-	if _, _, err := net.SplitHostPort(target); err != nil {
+	th, _, err := net.SplitHostPort(target)
+	if err != nil {
 		return nil, fmt.Errorf("webproxy: target must be host:port")
+	}
+	if isMetadataAddr(th) {
+		return nil, fmt.Errorf("webproxy: 禁止以链路本地/云元数据地址为目标（%s）", th)
 	}
 	scheme := "http"
 	if useTLS {
@@ -299,7 +305,11 @@ func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, us
 	}
 	tr := newProxyTransport(sshClient)
 	st := newStats()
-	srv := &http.Server{Handler: newReverseProxy(up, tr, st)}
+	srv := &http.Server{
+		Handler:           withLocalHostGuard(newReverseProxy(up, tr, st)),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	m.mu.Lock()
 	m.seq++
@@ -375,16 +385,50 @@ func (m *Registry) StopByHost(hostID string) int {
 	return len(stopped)
 }
 
+// isMetadataAddr 判断字面量 IP 是否为链路本地/云元数据地址（169.254.0.0/16、
+// fe80::/10）。目标经 SSH 在远端解析拨号，本地只能拦字面量 IP，DNS 名尽力而为。
+func isMetadataAddr(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 169 && ip4[1] == 254
+	}
+	return ip.IsLinkLocalUnicast()
+}
+
+// withLocalHostGuard 只接受回环 Host：代理监听在本机，DNS rebinding 场景下
+// Host 会是攻击者域名，直接拒绝（QX-016）。
+func withLocalHostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.TrimSuffix(strings.ToLower(host), ".")
+		ok := host == "localhost"
+		if ip := net.ParseIP(host); ip != nil {
+			ok = ip.IsLoopback()
+		}
+		if !ok {
+			http.Error(w, "Forbidden: unexpected Host header", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // newProxyTransport 让每个连接都拨到 Transport 自己解析出来的目标。
 // 之前这里忽略 addr、直接拨 upstream 的当前值，重定向期间并发到达的子资源请求
 // 可能在「Host 头取的是旧上游、拨号取的是新上游」之间错位，命中对面站点不存在的
 // 路径而拿到 4xx；改成按 addr 拨号后，URL/SNI/Host/连接四者永远指向同一个上游。
+// TLS 证书正常校验（QX-035）：自签名上游会失败，不再无条件信任。
 func newProxyTransport(sshClient *ssh.Client) *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return sshClient.Dial("tcp", addr)
 		},
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 		DisableCompression: true,
 		MaxIdleConns:       16,
 		IdleConnTimeout:    60 * time.Second,
@@ -404,7 +448,6 @@ func probeUpgrade(cl *ssh.Client, up *upstream) {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return cl.Dial("tcp", addr)
 		},
-		TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
 		DisableCompression: true,
 		DisableKeepAlives:  true,
 	}
@@ -447,6 +490,10 @@ func probeUpgrade(cl *ssh.Client, up *upstream) {
 		}
 		lu = base.ResolveReference(lu)
 		if lu.Host == "" || len(lu.Scheme) > 5 {
+			return
+		}
+		// 重定向枢轴同样禁止落到链路本地/元数据地址（QX-035）。
+		if isMetadataAddr(lu.Hostname()) {
 			return
 		}
 		ns, naddr := urlToAddr(lu)
