@@ -34,14 +34,17 @@ const FRAME_LOAD_TIMEOUT = 15000;
 const POLL_MIN_MS = 1200;
 const POLL_MAX_MS = 6000;
 const POLL_BACKOFF = 1.6;
-/** iframe 的 sandbox 白名单：保留脚本、同源存储、表单、弹窗、下载，但挡住整页顶掉宿主 */
+/** iframe 的 sandbox 白名单（QX-044）：保留脚本、同源存储、表单、弹窗、下载。
+ * 刻意不给 allow-top-navigation-by-user-activation（远程页不得整页导航宿主，
+ * 防全屏钓鱼）与 allow-popups-to-escape-sandbox（弹窗必须继承沙箱）。
+ * allow-same-origin 保留：代理源（127.0.0.1:随机端口）与宿主源隔离，远程页
+ * 摸不到宿主存储；跨上游 Cookie 串扰属代理层问题（QX-016 残留项）。 */
 const FRAME_SANDBOX = [
   'allow-scripts', 'allow-same-origin', 'allow-forms', 'allow-popups',
-  'allow-modals', 'allow-downloads', 'allow-popups-to-escape-sandbox',
-  'allow-top-navigation-by-user-activation',
+  'allow-modals', 'allow-downloads',
 ].join(' ');
-/** iframe 允许使用的浏览器能力 */
-const FRAME_ALLOW = 'clipboard-read; clipboard-write; fullscreen; autoplay; encrypted-media';
+/** iframe 允许使用的浏览器能力：不给 clipboard-read——远程页不得读取宿主剪贴板 */
+const FRAME_ALLOW = 'clipboard-write; fullscreen; autoplay; encrypted-media';
 
 /** 「更多选项」的缺省值：不转发 UDP，回环监听，端口交给系统分配 */
 const DEFAULT_OPTS = { udp: false, bind: '127.0.0.1', port: 0 };

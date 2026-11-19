@@ -75,7 +75,7 @@ export function chipGroup(items, active, onChange, opts = {}) {
     key: it.id,
     class: cx('cmp-chip', active === it.id && 'active'),
     type: 'button',
-    html: it.icon ? `${icon(it.icon, 'qicon-sm')}<span>${it.label}</span>` : `<span>${it.label}</span>`,
+    html: it.icon ? `${icon(it.icon, 'qicon-sm')}<span>${esc(it.label)}</span>` : `<span>${esc(it.label)}</span>`,
     onClick: () => onChange(it.id),
   })));
 }
@@ -247,7 +247,7 @@ export function Tabs({ items, active, onChange, cls = '' }) {
     key: it.id,
     class: cx('cmp-tab-top', active === it.id && 'active'),
     type: 'button',
-    html: it.icon ? `${icon(it.icon, 'qicon-sm')}<span>${it.label}</span>` : `<span>${it.label}</span>`,
+    html: it.icon ? `${icon(it.icon, 'qicon-sm')}<span>${esc(it.label)}</span>` : `<span>${esc(it.label)}</span>`,
     onClick: () => onChange(it.id),
   })));
 }
@@ -1052,7 +1052,7 @@ export function Collapsible(props) {
     h('button', {
       class: cx('cmp-collapse-head', isOpen.value && 'open'),
       type: 'button',
-      html: `${icon('chevron', 'qicon qicon-sm cmp-collapse-ic')}<span>${title}</span>`,
+      html: `${icon('chevron', 'qicon qicon-sm cmp-collapse-ic')}<span>${esc(title)}</span>`,
       onClick: () => { isOpen.next = !isOpen.value; },
     }),
     h('div', { class: cx('cmp-collapse-body', !isOpen.value && 'hidden') }, body),
@@ -1161,7 +1161,7 @@ export function MenuPanel(props) {
       key: `i${i}`,
       class: cx('menu-item', it.danger && 'danger', it.active && 'active'),
       type: 'button',
-      html: `${it.icon ? icon(it.icon, 'qicon qicon-sm') : ''}<span>${it.label ?? ''}</span>`,
+      html: `${it.icon ? icon(it.icon, 'qicon qicon-sm') : ''}<span>${esc(it.label ?? '')}</span>`,
       disabled: !!it.disabled,
       onClick: () => { onClose?.(); it.onClick?.(); },
     }, it.hint ? h('span', { class: 'menu-item-hint mono', text: it.hint }) : null);
@@ -1379,7 +1379,7 @@ export function DropdownButton(props) {
     ref: (el) => { ref.current = el; },
     class: cx(btnCls, cls),
     type: 'button',
-    html: `${label ? `<span>${label}</span>` : ''}${icon(iconName, 'qicon qicon-sm')}`,
+    html: `${label ? `<span>${esc(label)}</span>` : ''}${icon(iconName, 'qicon qicon-sm')}`,
     onClick: (e) => {
       e.stopPropagation();
       const r = ref.current ? ref.current.getBoundingClientRect() : { left: 0, bottom: 0 };

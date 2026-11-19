@@ -929,6 +929,20 @@ export async function psList(host, { user = '', search = '', limit = 100 } = {})
   return list;
 }
 
+/** Shell 双引号转义（QX-048）：双引号内 $、反引号、\、" 仍活跃，
+ * 逐个转义，防止 SDK 参数被注入为命令执行。 */
+function shq(s) {
+  return String(s).replace(/[\\"$`]/g, '\\$&');
+}
+
+/** 主机名/IP 字面量白名单（QX-048）：用于嵌套引号或裸位置嵌入的参数，
+ * 直接拒绝 shell 元字符。 */
+function hostLiteral(v, what) {
+  const s = String(v || '').trim();
+  if (!/^[A-Za-z0-9._:-]{1,253}$/.test(s)) throw new Error(`${what}含非法字符`);
+  return s;
+}
+
 /**
  * 终止远端主机上的指定进程（支持 PID 或进程名，自动支持提权）
  * @param {string} host 主机 ID
@@ -937,10 +951,13 @@ export async function psList(host, { user = '', search = '', limit = 100 } = {})
  */
 export async function killProcess(host, pidOrName, { signal = 'TERM', sudo = 'auto' } = {}) {
   const sig = String(signal).toUpperCase().replace(/^SIG/, '');
+  if (!/^[A-Z0-9]{1,15}$/.test(sig)) throw new Error('非法信号名');
   const target = String(pidOrName).trim();
   if (!target) throw new Error('PID or process name is required');
   const isPid = /^\d+$/.test(target);
-  const cmd = isPid ? `kill -s ${sig} ${target}` : `pkill -${sig} -f ${target} || killall -s ${sig} ${target}`;
+  const cmd = isPid
+    ? `kill -s ${sig} ${target}`
+    : `pkill -${sig} -f "${shq(target)}" || killall -s ${sig} "${shq(target)}"`;
   const r = await sh(host, cmd, { sudo, timeout: 15 });
   if (!r.ok) throw failureOf(r);
   return { ok: true, target, signal: sig, isPid };
@@ -1380,7 +1397,7 @@ export async function routeTable(host) {
  * @returns {Promise<{ open: boolean, target: string, port: number, latencyMs: number }>}
  */
 export async function testPort(host, target, port, { timeout = 3 } = {}) {
-  const tgt = String(target || '').trim();
+  const tgt = hostLiteral(target, '目标地址');
   const prt = parseInt(port, 10);
   if (!tgt || !prt) throw new Error('Target and port are required');
   const tmo = Math.max(1, Math.min(timeout, 30));
@@ -1405,11 +1422,12 @@ export async function testPort(host, target, port, { timeout = 3 } = {}) {
  * @returns {Promise<{ domain: string, addresses: string[], output: string }>}
  */
 export async function dnsResolve(host, domain, { dnsServer = '' } = {}) {
-  const dom = String(domain || '').trim();
+  const dom = hostLiteral(domain, '域名');
   if (!dom) throw new Error('Domain name is required');
-  const serverArg = dnsServer ? `@${dnsServer}` : '';
-  const cmd = dnsServer
-    ? `dig +short ${serverArg} ${dom} 2>/dev/null || nslookup ${dom} ${dnsServer} 2>/dev/null`
+  const server = dnsServer ? hostLiteral(dnsServer, 'DNS 服务器') : '';
+  const serverArg = server ? `@${server}` : '';
+  const cmd = server
+    ? `dig +short ${serverArg} ${dom} 2>/dev/null || nslookup ${dom} ${server} 2>/dev/null`
     : `getent hosts ${dom} 2>/dev/null || dig +short ${dom} 2>/dev/null || host ${dom} 2>/dev/null`;
   const r = await sh(host, cmd, { timeout: 15 });
   if (!r.ok) throw failureOf(r);
@@ -1505,7 +1523,7 @@ export async function pkgDetect(host) {
  * @returns {Promise<{ package: string, installed: boolean, version: string }>}
  */
 export async function pkgInstalled(host, pkgName) {
-  const name = String(pkgName || '').trim();
+  const name = shq(String(pkgName || '').trim());
   if (!name) throw new Error('Package name is required');
   const script = `
 if command -v dpkg >/dev/null 2>&1; then
@@ -1639,9 +1657,11 @@ export async function fileChecksum(host, path, { algo = 'sha256' } = {}) {
  * @param {object} [opts] { destDir: string, sudo: 'auto'|'always'|'never' }
  */
 export async function archiveExtract(host, archivePath, { destDir = '', sudo = 'auto' } = {}) {
-  const arc = String(archivePath || '').trim();
-  if (!arc) throw new Error('Archive path is required');
-  const dest = destDir ? String(destDir).trim() : arc.replace(/\.(tar\.(gz|bz2|xz)|tgz|zip|tar)$/i, '');
+  const arcRaw = String(archivePath || '').trim();
+  if (!arcRaw) throw new Error('Archive path is required');
+  const destRaw = destDir ? String(destDir).trim() : arcRaw.replace(/\.(tar\.(gz|bz2|xz)|tgz|zip|tar)$/i, '');
+  const arc = shq(arcRaw);
+  const dest = shq(destRaw);
   let cmd = '';
   if (arc.endsWith('.zip')) {
     cmd = `mkdir -p "${dest}" && unzip -q -o "${arc}" -d "${dest}"`;
@@ -1650,7 +1670,7 @@ export async function archiveExtract(host, archivePath, { destDir = '', sudo = '
   }
   const r = await sh(host, cmd, { sudo, timeout: 60 });
   if (!r.ok) throw failureOf(r);
-  return { ok: true, archive: arc, destDir: dest };
+  return { ok: true, archive: arcRaw, destDir: destRaw };
 }
 
 /**
@@ -1661,11 +1681,11 @@ export async function archiveExtract(host, archivePath, { destDir = '', sudo = '
  * @param {object} [opts] { sudo: 'auto'|'always'|'never' }
  */
 export async function archiveCreate(host, sourcePath, targetArchive, { sudo = 'auto' } = {}) {
-  const src = String(sourcePath || '').trim();
-  const tgt = String(targetArchive || '').trim();
-  if (!src || !tgt) throw new Error('Source path and target archive path are required');
-  const parent = src.substring(0, src.lastIndexOf('/')) || '.';
-  const base = src.substring(src.lastIndexOf('/') + 1);
+  const srcRaw = String(sourcePath || '').trim();
+  const tgt = shq(String(targetArchive || '').trim());
+  if (!srcRaw || !tgt) throw new Error('Source path and target archive path are required');
+  const parent = shq(srcRaw.substring(0, srcRaw.lastIndexOf('/')) || '.');
+  const base = shq(srcRaw.substring(srcRaw.lastIndexOf('/') + 1));
   let cmd = '';
   if (tgt.endsWith('.zip')) {
     cmd = `cd "${parent}" && zip -r -q "${tgt}" "${base}"`;
@@ -1678,7 +1698,7 @@ export async function archiveCreate(host, sourcePath, targetArchive, { sudo = 'a
   }
   const r = await sh(host, cmd, { sudo, timeout: 120 });
   if (!r.ok) throw failureOf(r);
-  return { ok: true, source: src, target: tgt };
+  return { ok: true, source: srcRaw, target: String(targetArchive || '').trim() };
 }
 
 /**

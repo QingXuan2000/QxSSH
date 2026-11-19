@@ -253,7 +253,10 @@ func (a *Gateway) sudoPrefix(app, host string, elevated bool) (prefix, stdinInit
 		return "", ""
 	}
 	if pw := a.sudoPassword(app, host); pw != "" {
-		return "sudo -S -p '' ", pw + "\n"
+		// sudo -k 先清时间戳，强制 -S 读取密码行（QX-033）：否则时间戳窗口内
+		// sudo 不消费 stdin，前置的密码会透传给命令 stdin，可能被回显。
+		// NOPASSWD 主机在 sudo/request 时已清空密码缓存，走下方 sudo -n 分支。
+		return "sudo -k; sudo -S -p '' ", pw + "\n"
 	}
 
 	return "sudo -n ", ""
