@@ -25,6 +25,12 @@ func (a *Gateway) appRoot(id string) (string, bool) {
 	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
 		return root, false
 	}
+	// 重定向目标必须是真实应用目录：manifest.json 合法且 id 匹配。
+	// 防止标记被夹带/篡改后把文件根指向配置目录等任意宿主目录（QX-001）。
+	m, err := validateDirManifest(src)
+	if err != nil || m.ID != id {
+		return root, false
+	}
 	return src, true
 }
 

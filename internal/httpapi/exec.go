@@ -213,6 +213,7 @@ type execSpec struct {
 	Elevated bool
 	Timeout  time.Duration
 	Local    bool
+	App      string
 }
 
 func timeoutSeconds(sec int, def, max time.Duration) time.Duration {
@@ -230,6 +231,11 @@ func (a *Gateway) newExecSpec(w http.ResponseWriter, r *http.Request, req execRu
 	if !a.requireExecPerm(w, r, req.Host) {
 		return execSpec{}, false
 	}
+	// elevated 是提权操作：额外要求 sudo:request（Danger 3），防止仅持
+	// exec:run 的应用借缓存凭据拿远端 root（QX-008）。
+	if req.Elevated && !a.requireElevatedPerm(w, r) {
+		return execSpec{}, false
+	}
 	return execSpec{
 		Host:     req.Host,
 		Argv:     req.Argv,
@@ -238,22 +244,23 @@ func (a *Gateway) newExecSpec(w http.ResponseWriter, r *http.Request, req execRu
 		Elevated: req.Elevated,
 		Timeout:  timeout,
 		Local:    req.Host == "",
+		App:      callerApp(r),
 	}, true
 }
 
-func (a *Gateway) sudoPrefix(host string, elevated bool) (prefix, stdinInit string) {
+func (a *Gateway) sudoPrefix(app, host string, elevated bool) (prefix, stdinInit string) {
 	if !elevated {
 		return "", ""
 	}
-	if pw := a.sudoPassword(host); pw != "" {
+	if pw := a.sudoPassword(app, host); pw != "" {
 		return "sudo -S -p '' ", pw + "\n"
 	}
 
 	return "sudo -n ", ""
 }
 
-func (a *Gateway) execWrapSudo(host string, elevated bool, cmd, stdin string) (string, string) {
-	pre, pw := a.sudoPrefix(host, elevated)
+func (a *Gateway) execWrapSudo(app, host string, elevated bool, cmd, stdin string) (string, string) {
+	pre, pw := a.sudoPrefix(app, host, elevated)
 	if pre == "" {
 		return cmd, stdin
 	}
@@ -261,7 +268,7 @@ func (a *Gateway) execWrapSudo(host string, elevated bool, cmd, stdin string) (s
 }
 
 func (a *Gateway) remoteCommand(s execSpec) (cmd string, stdin string) {
-	return a.execWrapSudo(s.Host, s.Elevated, execShellCmd(s.Argv, s.Cwd), s.Stdin)
+	return a.execWrapSudo(s.App, s.Host, s.Elevated, execShellCmd(s.Argv, s.Cwd), s.Stdin)
 }
 
 func execLocalCmd(ctx context.Context, argv []string, elevated bool) *exec.Cmd {

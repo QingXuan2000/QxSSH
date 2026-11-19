@@ -17,37 +17,61 @@ type sudoCred struct {
 	at time.Time
 }
 
-func (a *Gateway) sudoPassword(hostID string) string {
+// sudoBucket 把 sudo 凭据缓存按调用方分桶：宿主与内置应用同属一个信任域
+// （共享缓存，保持第一方体验）；第三方应用按 appID 隔离，防止仅持 exec:run
+// 的应用搭车宿主/其他应用缓存的 sudo 密码提权（QX-008）。
+func sudoBucket(app string) string {
+	if app == "" || app == hostApp || systemAppIDs[app] {
+		return hostApp
+	}
+	return app
+}
+
+func sudoKey(app, hostID string) string { return sudoBucket(app) + "\x00" + hostID }
+
+func (a *Gateway) sudoPassword(app, hostID string) string {
+	key := sudoKey(app, hostID)
 	a.sudoMu.Lock()
 	defer a.sudoMu.Unlock()
-	c, ok := a.sudoCreds[hostID]
+	c, ok := a.sudoCreds[key]
 	if !ok {
 		return ""
 	}
 	if time.Since(c.at) > sudoCredTTL {
-		delete(a.sudoCreds, hostID)
+		delete(a.sudoCreds, key)
 		return ""
 	}
 	return c.pw
 }
 
-func (a *Gateway) setSudoPassword(hostID, pw string) {
+func (a *Gateway) setSudoPassword(app, hostID, pw string) {
 	a.sudoMu.Lock()
 	defer a.sudoMu.Unlock()
 	if a.sudoCreds == nil {
 		a.sudoCreds = make(map[string]sudoCred)
 	}
-	a.sudoCreds[hostID] = sudoCred{pw: pw, at: time.Now()}
+	a.sudoCreds[sudoKey(app, hostID)] = sudoCred{pw: pw, at: time.Now()}
 }
 
-func (a *Gateway) clearSudoPassword(hostID string) {
+// clearSudoPassword 清除缓存：hostID 为空时清空调用方所在桶的全部条目；
+// 宿主桶的「全部清除」额外覆盖所有第三方桶（宿主有权重置全局）。
+func (a *Gateway) clearSudoPassword(app, hostID string) {
 	a.sudoMu.Lock()
 	defer a.sudoMu.Unlock()
 	if hostID == "" {
-		a.sudoCreds = make(map[string]sudoCred)
+		if sudoBucket(app) == hostApp {
+			a.sudoCreds = make(map[string]sudoCred)
+			return
+		}
+		prefix := sudoBucket(app) + "\x00"
+		for k := range a.sudoCreds {
+			if strings.HasPrefix(k, prefix) {
+				delete(a.sudoCreds, k)
+			}
+		}
 		return
 	}
-	delete(a.sudoCreds, hostID)
+	delete(a.sudoCreds, sudoKey(app, hostID))
 }
 
 type sudoAuthResult struct {
@@ -99,11 +123,11 @@ func (a *Gateway) handleSudoAuth(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case info.UID == 0:
-		a.clearSudoPassword(req.Host)
+		a.clearSudoPassword(callerApp(r), req.Host)
 		writeJSON(w, sudoAuthResult{OK: true, Mode: "root", Server: info.Server})
 
 	case info.Nopass:
-		a.clearSudoPassword(req.Host)
+		a.clearSudoPassword(callerApp(r), req.Host)
 		writeJSON(w, sudoAuthResult{OK: true, Mode: "nopass", Server: info.Server})
 
 	case req.Password == "" && !req.Submit:
@@ -126,7 +150,7 @@ func (a *Gateway) handleSudoAuth(w http.ResponseWriter, r *http.Request) {
 		text := strings.TrimSpace(out)
 		switch {
 		case hasLine(text, ok):
-			a.setSudoPassword(req.Host, req.Password)
+			a.setSudoPassword(callerApp(r), req.Host, req.Password)
 			a.log.Info("sudo auth ok (password)", "host", req.Host, "sudo", orDash(info.SudoBin))
 			writeJSON(w, sudoAuthResult{OK: true, Mode: "password", Server: info.Server})
 		case strings.Contains(text, bad):
@@ -167,6 +191,6 @@ func (a *Gateway) handleSudoForget(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("all") == "1" || r.URL.Query().Get("all") == "true" {
 		host = ""
 	}
-	a.clearSudoPassword(host)
+	a.clearSudoPassword(callerApp(r), host)
 	writeJSON(w, okResp{OK: true})
 }

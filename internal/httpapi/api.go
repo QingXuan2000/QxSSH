@@ -289,7 +289,11 @@ func (a *Gateway) routes() http.Handler {
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 
-		if r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Sec-Fetch-Mode"), "navigate") {
+		// 仅顶层文档导航注入宿主令牌：Sec-Fetch-Dest=document 排除 iframe 加载，
+		// 防止沙箱应用自导航宿主页造「套娃宿主」扩大令牌暴露面（QX-047）；
+		// 免鉴权部署下 withHostGuard 另行拒绝非回环 Host（QX-005）。
+		if r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Sec-Fetch-Mode"), "navigate") &&
+			strings.EqualFold(r.Header.Get("Sec-Fetch-Dest"), "document") {
 			var name string
 			switch r.URL.Path {
 			case "/", "/index.html":
@@ -308,7 +312,41 @@ func (a *Gateway) routes() http.Handler {
 		static.ServeHTTP(w, r)
 	}))
 
-	return withSecurityHeaders(a.withCORS(a.withAuth(a.withLogging(a.withRecovery(mux)))))
+	return withSecurityHeaders(a.withCORS(a.withHostGuard(a.withAuth(a.withLogging(a.withRecovery(mux))))))
+}
+
+// isTrustedLoopbackHost 判断 Host 头是否指向回环（127.0.0.0/8、::1、localhost）。
+func isTrustedLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// withHostGuard 在免鉴权（回环）部署下把 Host 头限制为回环/localhost。
+// 没有这道门禁时，恶意网页可用 DNS rebinding 把自有域名解析到 127.0.0.1，
+// 使浏览器以「同源」身份读取注入宿主令牌的页面与全部 API（QX-005）。
+// 配置了部署令牌的场景不限制 Host：令牌本身是门禁，且服务可能置于
+// 任意域名的反向代理之后。
+func (a *Gateway) withHostGuard(next http.Handler) http.Handler {
+	if a.authToken != "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isTrustedLoopbackHost(r.Host) {
+			http.Error(w, "Forbidden: unexpected Host header", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // corsPath 报告哪些路径需要跨源头：应用资源、共享前端资源、API 与未来的

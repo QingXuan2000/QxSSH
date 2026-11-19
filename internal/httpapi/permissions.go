@@ -39,6 +39,7 @@ var permGroups = []permGroup{
 }
 
 const (
+	permSudoRequest   = "sudo:request"
 	permLogsSensitive = "logs:readSensitive"
 	permLogsArchive   = "logs:archive"
 	permLogsClear     = "logs:clear"

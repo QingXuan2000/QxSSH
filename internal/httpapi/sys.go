@@ -337,6 +337,16 @@ func (a *Gateway) requireLocalExecPerm(w http.ResponseWriter, r *http.Request) b
 	return a.requireExecPerm(w, r, "")
 }
 
+// requireElevatedPerm 门禁提权（elevated）操作：要求 sudo:request（Danger 3）。
+// 宿主/内置应用恒过；第三方应用必须被显式授予 sudo 提权权限（QX-008）。
+func (a *Gateway) requireElevatedPerm(w http.ResponseWriter, r *http.Request) bool {
+	if !a.permAllowed(callerApp(r), permSudoRequest) {
+		writePermErr(w, []string{permSudoRequest})
+		return false
+	}
+	return true
+}
+
 func callerApp(r *http.Request) string {
 	v, _ := r.Context().Value(sysAppKey{}).(string)
 	return v

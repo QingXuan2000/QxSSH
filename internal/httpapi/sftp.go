@@ -280,7 +280,7 @@ func (a *Gateway) sftpWith(w http.ResponseWriter, r *http.Request, req any) (*sf
 		return nil, nil, false
 	}
 	host, elevated := sftpTarget(req)
-	sc, done, err := a.sftpClient(host, elevated)
+	sc, done, err := a.sftpClient(callerApp(r), host, elevated)
 	if err != nil {
 		writeOpErr(w, err)
 		return nil, nil, false
@@ -416,13 +416,17 @@ func (a *Gateway) cacheElevatedInfo(hostID string, info elevatedInfo) {
 	a.elevMu.Unlock()
 }
 
-func (a *Gateway) sftpClient(hostID string, elevated bool) (*sftp.Client, func(), error) {
+func (a *Gateway) sftpClient(app, hostID string, elevated bool) (*sftp.Client, func(), error) {
 	sshClient, err := a.mgr.Get(hostID)
 	if err != nil {
 		return nil, nil, err
 	}
 	if elevated {
-		pw := a.sudoPassword(hostID)
+		// 管理员模式是提权操作：与 exec 一致要求 sudo:request（QX-008）。
+		if !a.permAllowed(app, permSudoRequest) {
+			return nil, nil, fmt.Errorf("管理员模式需要 %s 权限", permSudoRequest)
+		}
+		pw := a.sudoPassword(app, hostID)
 		info, err := a.elevatedInfoFor(hostID, sshClient)
 		if err != nil {
 			a.log.Warn("sudo elevate probe failed", "host", hostID, "error", err.Error())
@@ -431,7 +435,7 @@ func (a *Gateway) sftpClient(hostID string, elevated bool) (*sftp.Client, func()
 		sc, done, err := elevatedClient(sshClient, info, pw)
 		if err != nil {
 			if pw != "" && errors.Is(err, errElevSession) {
-				a.clearSudoPassword(hostID)
+				a.clearSudoPassword(app, hostID)
 			}
 			a.log.Warn("sudo elevated session failed", "host", hostID, "error", err.Error())
 			return nil, nil, fmt.Errorf("管理员模式：%w", err)
@@ -460,7 +464,7 @@ func cleanPath(p string) string {
 func (a *Gateway) handleSftpList(w http.ResponseWriter, r *http.Request) {
 	hostID := r.URL.Query().Get("host")
 	p := cleanPath(r.URL.Query().Get("path"))
-	sc, done, err := a.sftpClient(hostID, elevatedFromQuery(r))
+	sc, done, err := a.sftpClient(callerApp(r), hostID, elevatedFromQuery(r))
 	if err != nil {
 		writeOpErr(w, err)
 		return
@@ -577,7 +581,7 @@ func (a *Gateway) handleSftpRename(w http.ResponseWriter, r *http.Request) {
 func (a *Gateway) handleSftpDownload(w http.ResponseWriter, r *http.Request) {
 	hostID := r.URL.Query().Get("host")
 	p := cleanPath(r.URL.Query().Get("path"))
-	sc, done, err := a.sftpClient(hostID, elevatedFromQuery(r))
+	sc, done, err := a.sftpClient(callerApp(r), hostID, elevatedFromQuery(r))
 	if err != nil {
 		writeOpErr(w, err)
 		return
@@ -776,7 +780,7 @@ func (a *Gateway) handleSftpUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	sc, done, err := a.sftpClient(hostID, elevatedFromQuery(r))
+	sc, done, err := a.sftpClient(callerApp(r), hostID, elevatedFromQuery(r))
 	if err != nil {
 		writeOpErr(w, err)
 		return
@@ -1035,7 +1039,11 @@ func (a *Gateway) handleSftpAttrs(w http.ResponseWriter, r *http.Request) {
 		flag = "-R "
 	}
 
-	pre, sudoIn := a.sudoPrefix(req.Host, req.Sudo || req.Elevated)
+	// attrs 的 sudo 路径同样是提权操作（QX-008）。
+	if (req.Sudo || req.Elevated) && !a.requireElevatedPerm(w, r) {
+		return
+	}
+	pre, sudoIn := a.sudoPrefix(callerApp(r), req.Host, req.Sudo || req.Elevated)
 	quoted := shellQuote(p)
 
 	type job struct{ op, cmd string }
