@@ -509,7 +509,11 @@ function setProp(el, k, val, old) {
     default:
       break;
   }
-  if (HOOK.test(k) && typeof val === 'function') return;
+  // on* 只接受函数（QX-073）：字符串值不得落成内联事件处理器（XSS 面）。
+  if (HOOK.test(k)) {
+    if (typeof val !== 'function') el.removeAttribute(k.toLowerCase());
+    return;
+  }
   if (k === 'nodeValue') { el.nodeValue = val == null ? '' : String(val); return; }
   if (IDL_PROPS.has(k) && k in el) {
     const cur = k === 'value' && el.tagName === 'OPTION' ? el.getAttribute('value') : el[k];

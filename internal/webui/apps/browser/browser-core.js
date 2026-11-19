@@ -630,8 +630,10 @@ async function mapLimit(items, fn) {
 
 async function resolveBare(cmd) {
   if (!cmd || hasPathSep(cmd)) return '';
+  // POSIX 单引号转义（QX-072）：JSON.stringify 的双引号内 $ 与反引号仍活跃。
+  const quoted = `'${String(cmd).replace(/'/g, `'\\''`)}'`;
   const r = await execRun({
-    argv: ['/bin/sh', '-c', `command -v -- ${JSON.stringify(cmd)}`],
+    argv: ['/bin/sh', '-c', `command -v -- ${quoted}`],
     timeout: 10,
   });
   if (!r || !r.ok || !r.output) return '';

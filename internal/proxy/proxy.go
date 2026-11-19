@@ -540,7 +540,13 @@ func newReverseProxy(up *upstream, tr *http.Transport, st *Stats) *httputil.Reve
 			}
 		}
 
-		r.Header.Set("X-Forwarded-For", "127.0.0.1")
+		// XFF 反映真实客户端地址而非固定 127.0.0.1（QX-078）：
+		// 固定值会让上游基于 IP 的信任判断失真。
+		if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			r.Header.Set("X-Forwarded-For", clientIP)
+		} else {
+			r.Header.Set("X-Forwarded-For", r.RemoteAddr)
+		}
 
 		for _, k := range []string{
 			"X-Real-IP", "Forwarded", "Client-IP", "True-Client-IP",

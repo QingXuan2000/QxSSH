@@ -1173,7 +1173,8 @@ func (a *Gateway) handleServeAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := os.Open(dest)
 	if err != nil {
-		writeErr(rec, http.StatusInternalServerError, err)
+		// 不回显底层错误（含宿主绝对路径，QX-059）。
+		writeErr(rec, http.StatusNotFound, errors.New("应用文件不存在"))
 		return
 	}
 	defer f.Close()

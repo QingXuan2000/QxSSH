@@ -88,6 +88,9 @@ func run() int {
 	flag.Parse()
 
 	if *authToken != "" {
+		if os.Getenv("QXSSH_AUTH_TOKEN") == "" {
+			fmt.Fprintln(os.Stderr, "提示：-auth-token 会出现在进程命令行（同机进程可见），建议改用环境变量 QXSSH_AUTH_TOKEN 注入。")
+		}
 		_ = os.Setenv("QXSSH_AUTH_TOKEN", *authToken)
 	}
 
