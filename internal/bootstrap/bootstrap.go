@@ -48,6 +48,8 @@ func New(store *config.Store, log *logging.Logger) (*Runtime, error) {
 	if log == nil {
 		log = logging.New(logging.LevelInfo)
 	}
+	// 凭据解密失败等静默故障接入日志（QX-074）。
+	store.SetWarnFn(func(msg string) { log.Warn("config store diagnostic", "detail", msg) })
 	mgr := sshpool.New(store, log)
 	tunnels := tunnel.New(mgr, store)
 	wp := proxy.New()

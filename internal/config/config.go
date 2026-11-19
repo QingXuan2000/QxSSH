@@ -52,6 +52,9 @@ type Store struct {
 	db   *sql.DB
 	gcm  cipher.AEAD
 	data storeData
+
+	// warnFn 是解密失败等静默故障的诊断回调（QX-074），经 SetWarnFn 注入。
+	warnFn func(msg string)
 }
 
 // ScopeGrant 是应用授权映射表（app_scopes）中的一条记录。
@@ -206,35 +209,50 @@ func (s *Store) reloadLocked() error {
 	return s.migrateGrantsToScopesLocked()
 }
 
-func (s *Store) encrypt(v string) string {
+// SetWarnFn 注册诊断回调（须在开始服务前调用）。解密失败不再无声返回
+// 空串：调用方要么向上传播错误，要么经此回调留下可排查的告警（QX-074）。
+func (s *Store) SetWarnFn(fn func(msg string)) {
+	s.mu.Lock()
+	s.warnFn = fn
+	s.mu.Unlock()
+}
+
+// warn 在持锁路径内调用（调用方已持 s.mu 读/写锁）。
+func (s *Store) warn(msg string) {
+	if s.warnFn != nil {
+		s.warnFn(msg)
+	}
+}
+
+func (s *Store) encrypt(v string) (string, error) {
 	if v == "" {
-		return ""
+		return "", nil
 	}
 	nonce := make([]byte, s.gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return ""
+		return "", fmt.Errorf("加密凭据失败（随机源不可用）: %w", err)
 	}
 	ct := s.gcm.Seal(nonce, nonce, []byte(v), nil)
-	return base64.StdEncoding.EncodeToString(ct)
+	return base64.StdEncoding.EncodeToString(ct), nil
 }
 
-func (s *Store) decrypt(v string) string {
+func (s *Store) decrypt(v string) (string, error) {
 	if v == "" {
-		return ""
+		return "", nil
 	}
 	data, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
-		return ""
+		return "", errors.New("凭据密文编码损坏（base64 解析失败）")
 	}
 	ns := s.gcm.NonceSize()
 	if len(data) < ns {
-		return ""
+		return "", errors.New("凭据密文长度不足（数据可能损坏）")
 	}
 	pt, err := s.gcm.Open(nil, data[:ns], data[ns:], nil)
 	if err != nil {
-		return ""
+		return "", errors.New("凭据解密失败（主密钥不匹配或数据损坏）")
 	}
-	return string(pt)
+	return string(pt), nil
 }
 
 // Seal 用主密钥加密 plaintext，aad 作为附加认证数据。返回的密文前带随机 nonce。
@@ -413,10 +431,21 @@ func (s *Store) GetHost(id string) (Host, bool) {
 	defer s.mu.RUnlock()
 	for _, h := range s.data.Hosts {
 		if h.ID == id {
-
-			h.Password = s.decrypt(h.Password)
-			h.KeyData = s.decrypt(h.KeyData)
-			h.KeyPassphrase = s.decrypt(h.KeyPassphrase)
+			// 解密失败保留空凭据（认证会失败），但留下告警便于排查（QX-074）。
+			for _, f := range []struct {
+				name string
+				dst  *string
+			}{
+				{"password", &h.Password},
+				{"keyData", &h.KeyData},
+				{"keyPassphrase", &h.KeyPassphrase},
+			} {
+				v, err := s.decrypt(*f.dst)
+				if err != nil {
+					s.warn(fmt.Sprintf("host %s field %s: %v", id, f.name, err))
+				}
+				*f.dst = v
+			}
 			return h, true
 		}
 	}
@@ -480,13 +509,25 @@ func (s *Store) CreateHost(u HostUpdate) (PublicHost, error) {
 		h.KeyPath = *u.KeyPath
 	}
 	if u.KeyData != nil {
-		h.KeyData = s.encrypt(*u.KeyData)
+		enc, err := s.encrypt(*u.KeyData)
+		if err != nil {
+			return PublicHost{}, err
+		}
+		h.KeyData = enc
 	}
 	if u.Password != nil {
-		h.Password = s.encrypt(*u.Password)
+		enc, err := s.encrypt(*u.Password)
+		if err != nil {
+			return PublicHost{}, err
+		}
+		h.Password = enc
 	}
 	if u.KeyPassphrase != nil {
-		h.KeyPassphrase = s.encrypt(*u.KeyPassphrase)
+		enc, err := s.encrypt(*u.KeyPassphrase)
+		if err != nil {
+			return PublicHost{}, err
+		}
+		h.KeyPassphrase = enc
 	}
 
 	s.mu.Lock()
@@ -535,7 +576,12 @@ func (s *Store) UpdateHost(id string, u HostUpdate) (PublicHost, error) {
 			h.KeyPath = *u.KeyPath
 		}
 		if u.KeyData != nil {
-			h.KeyData = s.encrypt(*u.KeyData)
+			enc, err := s.encrypt(*u.KeyData)
+			if err != nil {
+				s.data.Hosts[i] = prev
+				return PublicHost{}, err
+			}
+			h.KeyData = enc
 		}
 		if u.Note != nil {
 			h.Note = *u.Note
@@ -544,10 +590,20 @@ func (s *Store) UpdateHost(id string, u HostUpdate) (PublicHost, error) {
 			h.JumpHostID = *u.JumpHostID
 		}
 		if u.Password != nil {
-			h.Password = s.encrypt(*u.Password)
+			enc, err := s.encrypt(*u.Password)
+			if err != nil {
+				s.data.Hosts[i] = prev
+				return PublicHost{}, err
+			}
+			h.Password = enc
 		}
 		if u.KeyPassphrase != nil {
-			h.KeyPassphrase = s.encrypt(*u.KeyPassphrase)
+			enc, err := s.encrypt(*u.KeyPassphrase)
+			if err != nil {
+				s.data.Hosts[i] = prev
+				return PublicHost{}, err
+			}
+			h.KeyPassphrase = enc
 		}
 		if err := s.validateJumpLocked(h); err != nil {
 			s.data.Hosts[i] = prev
@@ -1670,22 +1726,25 @@ func (s *Store) SecretGet(appID, key string) (string, bool) {
 	if err := s.db.QueryRow(`SELECT value FROM app_secrets WHERE app_id = ? AND key = ?`, appID, key).Scan(&enc); err != nil {
 		return "", false
 	}
-	v := s.decrypt(enc)
+	v, err := s.decrypt(enc)
+	if err != nil {
+		s.warn(fmt.Sprintf("secret %s/%s: %v", appID, key, err))
+	}
 	return v, v != ""
 }
 
 // SecretSet 加密保存某应用的机密（存在即覆盖）。
 func (s *Store) SecretSet(appID, key, value string) error {
-	enc := s.encrypt(value)
-	if enc == "" {
-		return errors.New("加密失败")
+	enc, err := s.encrypt(value)
+	if err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return errNoDB
 	}
-	_, err := s.db.Exec(`INSERT INTO app_secrets (app_id, key, value, updated_at) VALUES (?, ?, ?, ?)
+	_, err = s.db.Exec(`INSERT INTO app_secrets (app_id, key, value, updated_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT(app_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
 		appID, key, enc, time.Now().Unix())
 	return err
