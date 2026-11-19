@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 7 轮，累计 50 项）
+### 已修复（截至 2026-11-19 第 8 轮，累计 54 项）
 
 **第 1 轮**
 
@@ -537,6 +537,17 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-039（Medium） | 系统审计独立文件 curDir/system.jsonl（不属于任何工作组，组级清空/归档/轮转不可触及，单代轮转）；logs/clear、archive、settings、verbose 四类管理操作记录调用者+参数 | faee416 |
 | QX-040（Medium） | logs 应用 storage 命名空间的 audit/archlive 子树设为系统保留区（storePath 单一 chokepoint 覆盖全部操作含 rename 两端）；根列表隐藏保留目录 | faee416 |
 
+**第 8 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-044（Medium） | browser 嵌套 iframe 移除 allow-top-navigation-by-user-activation（远程页不得整页导航宿主）与 allow-popups-to-escape-sandbox（弹窗继承沙箱）；FRAME_ALLOW 移除 clipboard-read（远程页不得读宿主剪贴板）；allow-same-origin 保留并注明代理源隔离理由（Cookie 串扰归 QX-016 残留） | 4c82603 |
+| QX-045（Medium） | chipGroup/Tabs/Collapsible/MenuPanel/DropdownButton 的 label/title 全部 esc()（确认的动态流 browserLabel 菜单 XSS 关闭）；table render 的 html 为显式 opt-in 语义保留 | 4c82603 |
+| QX-048（Medium） | appkit 新增 shq 双引号转义 + hostLiteral 白名单；killProcess 信号白名单+进程名加引号；testPort/dnsResolve 字面量校验；pkgInstalled/archiveExtract/archiveCreate 全转义；返回值保持原始路径 | 4c82603 |
+| QX-033（Medium） | sudoPrefix 改 `sudo -k; sudo -S`：清时间戳强制消费密码行，时间戳窗口内密码不再透传命令 stdin。残留：elevated WS 的 PTY 回显竞态（sudo 自身会关 echo，待运行时验证） | 4c82603 |
+
+**QX-049 归并注记**：tunnels.create 的 hostId 覆盖属 QX-026（授权无主机维度）的实例，随按主机授权设计一并解决。
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -547,8 +558,8 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 ### 待修复（后续轮次）
 
 - High 仅剩：QX-004（主密钥移出 data.db / OS 密钥链 / 口令派生——需独立设计轮）
-- Medium 剩余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-033（sudo 回显）、QX-044/045/048/049（前端沙箱/渲染/SDK）
-- P2：其余 Low/Info 逐项（QX-016 残留等）
+- Medium 剩余：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
+- P2：其余 Low/Info 逐项（QX-016 残留、QX-050/051/053-063/066-073 等）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
