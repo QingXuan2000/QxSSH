@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -364,6 +365,10 @@ func (a *Gateway) handleAuditVerbose(w http.ResponseWriter, r *http.Request) {
 		state = "已开启"
 	}
 	a.log.Info("audit verbose changed", "verbose", req.Verbose)
+	a.audit.recordSystem(auditEntry{
+		Target: "logs/verbose",
+		Detail: fmt.Sprintf("caller=%s verbose=%v", callerApp(r), req.Verbose), Result: "ok",
+	})
 	writeJSON(w, auditVerboseResp{OK: true, Verbose: req.Verbose, State: state, Settings: set})
 }
 
@@ -423,6 +428,12 @@ func (a *Gateway) handleAuditSettings(w http.ResponseWriter, r *http.Request) {
 	a.log.Info("audit settings changed",
 		"verbose", set.Verbose, "maxBytes", set.MaxBytes, "archives", set.Archives,
 		"rotateMode", set.RotateMode, "retentionDays", set.RetentionDays)
+	a.audit.recordSystem(auditEntry{
+		HostID: group, Target: "logs/settings",
+		Detail: fmt.Sprintf("caller=%s verbose=%v maxBytes=%d archives=%d rotate=%s retention=%d",
+			callerApp(r), set.Verbose, set.MaxBytes, set.Archives, set.RotateMode, set.RetentionDays),
+		Result: "ok",
+	})
 	writeJSON(w, auditSettingsSetResp{
 		OK: true, Settings: set, Group: a.auditGroup(group), Path: a.audit.Path(), ArchivePath: a.audit.ArchivePath(),
 	})
@@ -447,6 +458,11 @@ func (a *Gateway) handleAuditArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("audit archived", "group", group, "bytes", res.Freed)
+	// 管理操作自身入独立系统审计（QX-039）。
+	a.audit.recordSystem(auditEntry{
+		HostID: group, Target: "logs/archive",
+		Detail: fmt.Sprintf("caller=%s freed=%d", callerApp(r), res.Freed), Result: "ok",
+	})
 	writeJSON(w, auditResultResp{
 		OK: true, Result: res, Group: a.auditGroup(group), Path: a.audit.Path(), ArchivePath: a.audit.ArchivePath(),
 	})
@@ -471,6 +487,11 @@ func (a *Gateway) handleAuditClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("audit cleared", "group", group, "bytes", res.Freed)
+	// 清空操作自身入独立系统审计（QX-039）：组级清空删不掉 system.jsonl。
+	a.audit.recordSystem(auditEntry{
+		HostID: group, Target: "logs/clear",
+		Detail: fmt.Sprintf("caller=%s freed=%d", callerApp(r), res.Freed), Result: "ok",
+	})
 	writeJSON(w, auditClearResp{
 		OK: true, Result: res, Group: a.auditGroup(group),
 		Verbose: a.audit.Verbose(), Path: a.audit.Path(), ArchivePath: a.audit.ArchivePath(),

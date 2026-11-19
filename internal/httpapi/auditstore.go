@@ -224,6 +224,40 @@ func (s *auditStore) writeLoop() {
 	defer close(s.done)
 	var f *os.File
 	var cur string
+	// 系统审计独立文件（QX-039）：审计管理操作（清空/归档/改配置）记在
+	// curDir 根的 system.jsonl，不属于任何工作区分组，组级清空/归档/轮转
+	// 都碰不到它——反取证操作自身留痕。单代轮转保留最近两代。
+	var sf *os.File
+	sysPath := filepath.Join(s.curDir, "system.jsonl")
+	writeSys := func(e auditEntry) {
+		if s.curDir == "" {
+			return
+		}
+		if sf == nil {
+			var err error
+			sf, err = os.OpenFile(sysPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				s.log.Warn("system audit open failed", "error", err.Error())
+				return
+			}
+		}
+		line, err := s.marshalLine(e)
+		if err != nil {
+			return
+		}
+		line = append(line, '\n')
+		if _, err := sf.Write(line); err != nil {
+			s.log.Warn("system audit append failed", "error", err.Error())
+			sf.Close()
+			sf = nil
+			return
+		}
+		if fi, err := sf.Stat(); err == nil && fi.Size() >= s.settings().MaxBytes {
+			sf.Close()
+			_ = os.Rename(sysPath, filepath.Join(s.curDir, "system.old.jsonl"))
+			sf = nil
+		}
+	}
 	write := func(e auditEntry) {
 		g := auditGroupDir(e.HostID)
 		if f == nil || g != cur {
@@ -275,7 +309,7 @@ func (s *auditStore) writeLoop() {
 				sq = nil
 				continue
 			}
-			write(e)
+			writeSys(e)
 		case c, ok := <-cc:
 
 			if !ok {
@@ -292,6 +326,9 @@ func (s *auditStore) writeLoop() {
 	}
 	if f != nil {
 		f.Close()
+	}
+	if sf != nil {
+		sf.Close()
 	}
 }
 

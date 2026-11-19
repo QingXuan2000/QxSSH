@@ -152,6 +152,20 @@ func (a *Gateway) storePath(w http.ResponseWriter, r *http.Request, rel string) 
 		writeErr(w, http.StatusBadRequest, err)
 		return "", "", false
 	}
+	// logs 应用命名空间下的审计存储（audit/archlive）是系统保留区（QX-040）：
+	// 否则 logs 应用被攻破后持 storage:write 即可直接篡改/伪造审计记录。
+	if app == auditAppID {
+		relTo, rerr := filepath.Rel(dir, target)
+		if rerr != nil {
+			writeErr(w, http.StatusBadRequest, rerr)
+			return "", "", false
+		}
+		first := strings.SplitN(filepath.ToSlash(relTo), "/", 2)[0]
+		if first == auditCurSub || first == auditArcSub {
+			writeErr(w, http.StatusForbidden, errors.New("审计存储为系统保留区，禁止经应用存储接口访问"))
+			return "", "", false
+		}
+	}
 	return dir, target, true
 }
 
@@ -169,6 +183,10 @@ func (a *Gateway) handleStoreList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]storeEntry, 0, len(ents))
 	for _, e := range ents {
+		// logs 命名空间列表隐藏系统保留目录（QX-040）。
+		if callerApp(r) == auditAppID && (e.Name() == auditCurSub || e.Name() == auditArcSub) {
+			continue
+		}
 		info, ierr := e.Info()
 		size := int64(0)
 		mod := int64(0)
