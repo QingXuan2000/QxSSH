@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 9 轮，累计 65 项）
+### 已修复（截至 2026-11-19 第 10 轮，累计 69 项）
 
 **第 1 轮**
 
@@ -564,6 +564,15 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-057 | CLI 传 token 时告警建议环境变量注入 | f500a35 |
 | QX-059 | apps/file 打开错误回通用 404，不泄露宿主路径 | f500a35 |
 
+**第 10 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-062 | net/http 禁止转发 Sec-Fetch-*/Sec-CH-*/X-Qx-Session/Authorization/Cookie/Proxy-Authorization——伪造 fetch 元数据骗取宿主令牌注入的路径关闭，凭据头不再发往任意目标 | f34a509 |
+| QX-053 | jti 吊销名单持久化 configDir/idp-deny.json（0600 原子写），启动加载并清理过期项；单枚吊销跨重启有效 | f34a509 |
+| QX-055（部分） | session/mint 审计记录 extraScopes（授权表外的唯一可追溯面）；续期语义变更属产品决策，留设计注记 | f34a509 |
+| QX-063 | SOCKS UDP 关联上限 32、单关联管道上限 256（锁内双重检查）；核实空闲 TTL 本已存在（assoc 5min/agent 10min/janitor 30s），审计该点部分 overstated | bf69ce9 |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -571,11 +580,11 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - 语义层面的"空实现"：QX-074（encrypt/decrypt 失败静默返回空串）列入后续修复，以错误传播替代。
 - 本轮已删除被替代的死代码：`redactSessionInQuery`（功能并入 sanitizeAuditQuery）。
 
-### 待修复（后续轮次，剩余 15 项）
+### 待修复（后续轮次，剩余约 11 项）
 
 - High：QX-004（主密钥管理——独立设计轮）
 - Medium：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
-- Low/Info：QX-016 残留（代理能力路径/Cookie 隔离）、QX-053（jti 名单持久化）、QX-055（extraScopes 续期语义）、QX-056（CSP）、QX-058（令牌出 URL/限速）、QX-062（net/http 转发 Sec-Fetch 头）、QX-063（UDP/SOCKS 限额）、QX-066（PID 复用竞态）、QX-068（远端日志上限）、QX-071（init prefs 过滤）、QX-075/076/077/079/080（Info 注记类）
+- Low/Info：QX-016 残留（代理能力路径/Cookie 隔离）、QX-056（CSP）、QX-058（令牌出 URL/限速）、QX-066（PID 复用竞态）、QX-068（远端日志上限）、QX-071（init prefs 过滤）、QX-075/076/077/079/080（Info 注记类）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
