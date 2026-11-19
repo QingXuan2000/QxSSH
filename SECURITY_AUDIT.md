@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 10 轮，累计 69 项）
+### 已修复（截至 2026-11-19 第 11 轮，累计 71 项）
 
 **第 1 轮**
 
@@ -573,6 +573,25 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-055（部分） | session/mint 审计记录 extraScopes（授权表外的唯一可追溯面）；续期语义变更属产品决策，留设计注记 | f34a509 |
 | QX-063 | SOCKS UDP 关联上限 32、单关联管道上限 256（锁内双重检查）；核实空闲 TTL 本已存在（assoc 5min/agent 10min/janitor 30s），审计该点部分 overstated | bf69ce9 |
 
+**第 11 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-066 | bgProc.kill 改用启动时保存的进程句柄、持 p.mu 检查 finished 后终止（消除 FindProcess 窗口）；内核级 PID 复用竞态需 pidfd（标准库未提供），已注记 | 1c441f2 |
+| QX-058（部分） | withAuth 鉴权失败按来源 IP 限速 20 次/60s（map 上限 1024）；令牌出 URL 的协议变更留设计注记 | 1c441f2 |
+
+**决策注记（本轮评审）**
+- **QX-071 → 可接受风险**：核实全局 prefs 键空间全部为 qx-* UI 设置（theme/wallpaper/taskbar/glass/hidden-icons/sm-fav 等），不含凭据或敏感主机数据；init 下发全量 prefs 不构成信息泄露，关闭该项。
+- **QX-068 → 延迟（设计注记）**：远端 out.log 上限需重构 job shell 管道（head -c 截断会改变退出码语义/触发 SIGPIPE，dash 无 PIPESTATUS）；且 job:run 为 Danger 3，持权应用本就能写任意文件——属防误操作的纵深防御而非安全边界，留待 job 协议重设计。
+- **QX-056 → 延迟（设计注记）**：宿主 CSP 需逐资源核对（应用帧/proxy 帧/blob 下载/内联样式），无运行时测试条件下贸然上线会破坏功能；建议后续在可实测环境按 default-src 'self' + frame-src 127.0.0.1 代理端口 + blob: 白名单渐进部署。
+
+### QX-004 主密钥管理设计方案（下轮实施）
+
+分层方案，纯 Go 跨平台（不引入 cgo，与 modernc SQLite 一致）：
+1. **立即层（零 UX 变化）**：主密钥移出 data.db → 独立 `configDir/master.key`（0600）。迁移：meta.master_key 存在且密钥文件缺失时写出文件并删除 meta 行。备份/同步单独泄露 data.db 不再等于全量凭据泄露。
+2. **可选加固层**：`QXSSH_MASTER_PASSPHRASE` 环境变量（或启动参数）设置时，用 Argon2id（x/crypto 已在依赖）派生 KEK 包裹 master.key（salt+nonce+密文）；Load 时解包，口令错误 fail-closed 拒绝启动。未设置时记录 Warn 提示。
+3. **未来层**：平台密钥链（Windows DPAPI 可经 x/sys/windows 纯 Go 调用；macOS/Linux 需 cgo 或 dbus，另行评估）。
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -580,11 +599,12 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - 语义层面的"空实现"：QX-074（encrypt/decrypt 失败静默返回空串）列入后续修复，以错误传播替代。
 - 本轮已删除被替代的死代码：`redactSessionInQuery`（功能并入 sanitizeAuditQuery）。
 
-### 待修复（后续轮次，剩余约 11 项）
+### 待修复（后续轮次，剩余约 9 项）
 
-- High：QX-004（主密钥管理——独立设计轮）
+- High：QX-004（方案已定，下轮实施）
 - Medium：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
-- Low/Info：QX-016 残留（代理能力路径/Cookie 隔离）、QX-056（CSP）、QX-058（令牌出 URL/限速）、QX-066（PID 复用竞态）、QX-068（远端日志上限）、QX-071（init prefs 过滤）、QX-075/076/077/079/080（Info 注记类）
+- 延迟/注记：QX-016 残留、QX-056（CSP）、QX-058 残留（令牌出 URL）、QX-068（job 日志上限）
+- Info：QX-075/076/077/079/080（注记类，随最终验证一并评审关闭）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
