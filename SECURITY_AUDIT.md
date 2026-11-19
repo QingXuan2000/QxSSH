@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 5 轮，P0 全部完成，P1 过半）
+### 已修复（截至 2026-11-19 第 6 轮，P0 全部完成，P1 大部完成）
 
 **第 1 轮**
 
@@ -515,6 +515,17 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 | QX-023（Medium） | data.db/-wal/-shm 显式 chmod 0600；配置目录显式 chmod 0700（MkdirAll 不修正已存在目录）。Windows ACL 加固为后续项 | 829e387 |
 | QX-024（Medium） | 刷新令牌以 SHA-256 哈希落库（Save/Get/Revoke/Rotate 边界转换）；GetRefresh 对旧明文行懒迁移；读库不再等于可用凭据 | 829e387 |
 
+**第 6 轮**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| QX-030（Medium） | job status/output/kill/remove 校验 meta.App 归属（宿主豁免）；list 按调用者过滤；归属本地缓存 + 远端 meta 懒加载；startJob 记录归属 | cd2d82a |
+| QX-041（Medium） | zip 解压双重限流（声明值 + 剩余总预算，+1 探测字节），超限即中止；失败清理半解压目录 | cd2d82a |
+| QX-043（Medium） | git 克隆缓存从共享 /tmp 迁入 configDir/git-cache（0700），杜绝跨用户投毒 | cd2d82a |
+| QX-064（Low，完成） | 网关 ReadHeaderTimeout 防慢速攻击；注释说明不设 ReadTimeout（大上传）/WriteTimeout（WS/流式）的理由 | cd2d82a |
+| QX-037（Medium） | SFTP 上传请求体 MaxBytesReader + 远端写入 LimitReader 双硬限（512MB）；超限删除远端半成品 | 4af6de2 |
+| QX-038（Medium） | copy/move 拒绝自嵌套目标；copyPath 深度上限 64（符号链接环）；removeRecursive 改 Lstat（删链接本身不删目标内容） | 4af6de2 |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -525,8 +536,8 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 ### 待修复（后续轮次）
 
 - High 仅剩：QX-004（主密钥移出 data.db / OS 密钥链 / 口令派生——需独立设计轮）
-- P1 其余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-029（refresh 轮换原子性）、QX-030（job 归属）、QX-031/032（审计缺口/归属）、QX-033（sudo 回显）、QX-034（WS 超时）、QX-037/038（SFTP 上传/递归）、QX-039/040（审计反取证）、QX-041（zip 炸弹）、QX-043（git 缓存）、QX-044/045/048/049（前端沙箱/渲染/SDK）
-- P2：其余 Low/Info 逐项（QX-016 残留、QX-064 网关侧等）
+- P1 其余：QX-021（首信指纹确认）、QX-026（按主机授权）、QX-029（refresh 轮换原子性）、QX-031/032（审计缺口/归属）、QX-033（sudo 回显）、QX-034（WS 超时）、QX-039/040（审计反取证）、QX-044/045/048/049（前端沙箱/渲染/SDK）
+- P2：其余 Low/Info 逐项（QX-016 残留等）
 
 ---
 *报告由 6 个并行专项审计 + 汇总复核生成；原始发现 107 项，去重后 80 项。*
