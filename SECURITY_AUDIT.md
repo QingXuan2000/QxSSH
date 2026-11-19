@@ -441,7 +441,7 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 
 > 本节随修复推进更新。修复均在 `security-fixes` 分支提交，每批经 `go build`/`go vet`（前端经 Node 语法校验）验证。
 
-### 已修复（截至 2026-11-19 第 11 轮，累计 71 项）
+### 已修复（截至 2026-11-19 第 12 轮，累计 72 项，**High/Critical 全部清零**）
 
 **第 1 轮**
 
@@ -592,6 +592,13 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 2. **可选加固层**：`QXSSH_MASTER_PASSPHRASE` 环境变量（或启动参数）设置时，用 Argon2id（x/crypto 已在依赖）派生 KEK 包裹 master.key（salt+nonce+密文）；Load 时解包，口令错误 fail-closed 拒绝启动。未设置时记录 Warn 提示。
 3. **未来层**：平台密钥链（Windows DPAPI 可经 x/sys/windows 纯 Go 调用；macOS/Linux 需 cgo 或 dbus，另行评估）。
 
+**第 12 轮（QX-004 实施完成）**
+
+| 发现 | 修复内容 | 提交 |
+|---|---|---|
+| **QX-004（High，最后一个 High）** | 主密钥移出 data.db 至独立 master.key（0600 原子写）；旧 meta.master_key 行迁移后删除；QXSSH_MASTER_PASSPHRASE 设置时 Argon2id(3,64MB,4) KEK 包裹（QXMK1+salt+nonce+GCM），错误/缺失口令 fail-closed，裸文件自动升级包裹。功能测试 6 场景全过（往返/错口令/迁移/重载/升级/双 fail-closed） | a2d77b3 |
+| 文档同步 | README 安全章节修正过时描述（内置全量权限→最小授权、一次性令牌→握手下发、meta 存密钥→独立文件），补 QXSSH_MASTER_PASSPHRASE 环境变量行与主密钥分离条目，TOFU/隧道/Host 防护描述与实现对齐 | 449806e |
+
 ### 空实现盘点结论
 
 - Go 层 634 个函数声明：**0 个未使用函数、0 个空函数体、0 个零值占位返回、0 个仅注释函数体**（脚本全量扫描 + 人工复核）。
@@ -599,10 +606,9 @@ appgit.go URL 消毒未限制协议白名单。修复：仅允许 https（+显�
 - 语义层面的"空实现"：QX-074（encrypt/decrypt 失败静默返回空串）列入后续修复，以错误传播替代。
 - 本轮已删除被替代的死代码：`redactSessionInQuery`（功能并入 sanitizeAuditQuery）。
 
-### 待修复（后续轮次，剩余约 9 项）
+### 待修复（后续轮次）
 
-- High：QX-004（方案已定，下轮实施）
-- Medium：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
+- Medium 设计项：QX-021（首信指纹确认交互）、QX-026（按主机授权，含 QX-049）
 - 延迟/注记：QX-016 残留、QX-056（CSP）、QX-058 残留（令牌出 URL）、QX-068（job 日志上限）
 - Info：QX-075/076/077/079/080（注记类，随最终验证一并评审关闭）
 
