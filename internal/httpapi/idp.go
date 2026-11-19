@@ -896,6 +896,12 @@ func (a *Gateway) handleSessionRefresh(w http.ResponseWriter, r *http.Request) {
 		RotFrom: req.RefreshToken, Exp: sess.RefreshExp, LastUse: now, CreatedAt: now,
 		ExtraScopes: row.ExtraScopes,
 	}); err != nil {
+		if errors.Is(err, config.ErrRefreshReused) {
+			// 并发重用绕过了预检：轮换原子检测命中，按泄露整体撤销（QX-029）。
+			a.revokeAppTokens(row.AppID, "refresh_reuse")
+			writeErr(w, http.StatusUnauthorized, errors.New("刷新令牌已被轮换，该应用全部令牌已吊销"))
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}

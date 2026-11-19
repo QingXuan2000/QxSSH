@@ -1373,8 +1373,14 @@ func (s *Store) RevokeRefreshToken(token string) error {
 	return err
 }
 
+// ErrRefreshReused 表示轮换时旧令牌已被吊销（并发重用或重放，QX-029）。
+// 调用方应据此触发「重用即泄露」的整体撤销。
+var ErrRefreshReused = errors.New("刷新令牌已被轮换")
+
 // RotateRefresh 把旧刷新令牌置为「已轮换」并写入新记录（令牌以哈希落库）。
-// 两者在同一事务里完成，避免中途失败留下「旧令牌仍有效、新令牌不存在」的窗口。
+// 两者在同一事务里完成；旧令牌的吊销带 revoked=0 条件并检查影响行数：
+// 并发重用同一旧令牌时，后到者在此原子地被拒绝（QX-029），不再依赖
+// 处理层「先查后改」的非原子预检。
 func (s *Store) RotateRefresh(old string, nr RefreshRow) error {
 	if old == "" || nr.Token == "" {
 		return errors.New("轮换刷新令牌时新旧令牌都不能为空")
@@ -1385,9 +1391,14 @@ func (s *Store) RotateRefresh(old string, nr RefreshRow) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token IN (?, ?)`, refreshKey(old), old); err != nil {
+	res, err := tx.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token IN (?, ?) AND revoked = 0`, refreshKey(old), old)
+	if err != nil {
 		tx.Rollback()
 		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		tx.Rollback()
+		return ErrRefreshReused
 	}
 	if _, err := tx.Exec(`INSERT INTO app_refresh (token, app_id, jti, rot_from, exp, revoked, last_use, created_at, extra_scopes)
 		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)

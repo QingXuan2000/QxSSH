@@ -104,6 +104,7 @@ func (a *Gateway) serveLocalExecWS(w http.ResponseWriter, r *http.Request, cmd *
 			close(gone)
 		})
 	}
+	wsKeepalive(conn, gone, shutdown)
 
 	var pumps sync.WaitGroup
 	pumps.Add(2)

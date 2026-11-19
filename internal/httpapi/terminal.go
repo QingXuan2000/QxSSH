@@ -22,6 +22,41 @@ var upgrader = websocket.Upgrader{
 
 const wsMaxSessions = 64
 
+// WS 保活参数（QX-034）：半开连接在 pongWait 内被检出并释放 wsSlots，
+// 防止 64 条死连接耗尽长连接名额；写超时防泵 goroutine 卡死在死 TCP 上。
+const (
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = 25 * time.Second
+	wsWriteWait  = 10 * time.Second
+)
+
+// wsKeepalive 为连接设置读限期 + pong 重置 + 周期 ping。stop 关闭时停止
+// ping；ping 失败触发 onDead 结束会话。浏览器 WS 客户端自动回 pong。
+func wsKeepalive(conn *websocket.Conn, stop <-chan struct{}, onDead func()) {
+	_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
+		return nil
+	})
+	go func() {
+		t := time.NewTicker(wsPingPeriod)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+					if onDead != nil {
+						onDead()
+					}
+					return
+				}
+			}
+		}
+	}()
+}
+
 func sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" || origin == "null" {
@@ -89,12 +124,14 @@ type wsWriter struct {
 func (w *wsWriter) binary(b []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_ = w.c.SetWriteDeadline(time.Now().Add(wsWriteWait))
 	return w.c.WriteMessage(websocket.BinaryMessage, b)
 }
 
 func (w *wsWriter) json(v any) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	_ = w.c.SetWriteDeadline(time.Now().Add(wsWriteWait))
 	return w.c.WriteJSON(v)
 }
 
@@ -220,6 +257,7 @@ func (a *Gateway) serveSessionWS(w http.ResponseWriter, r *http.Request, hostID,
 	done := make(chan struct{})
 	var once sync.Once
 	finish := func() { once.Do(func() { close(done) }) }
+	wsKeepalive(conn, done, finish)
 
 	go wsPump(wr, stdout, finish, finish)
 	go wsPump(wr, stderr, finish, nil)
