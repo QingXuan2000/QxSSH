@@ -2,7 +2,10 @@
   "id": "terminal",
   "name": "终端",
   "nameKey": "core.app.terminal.name",
-  "languages": ["zh-CN", "en-US"],
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
   "version": "1.0.0",
   "description": "SSH 终端：多标签、分屏、会话保存与自动重连",
   "descriptionKey": "core.app.terminal.desc",
@@ -10,10 +13,25 @@
   "icon": "terminal",
   "category": "工具",
   "categoryKey": "core.category-tool",
-  "keywords": ["shell", "ssh", "zhongduan", "console"],
+  "keywords": [
+    "shell",
+    "ssh",
+    "zhongduan",
+    "console"
+  ],
   "entry": "index.html",
-  "preferredSize": { "width": 960, "height": 600, "minWidth": 520, "minHeight": 300 },
-  "permissions": ["term:open", "hosts:read"],
+  "preferredSize": {
+    "width": 960,
+    "height": 600,
+    "minWidth": 520,
+    "minHeight": 300
+  },
+  "permissions": [
+    "term:open",
+    "hosts:read",
+    "prefs:self:write",
+    "prefs:self:read"
+  ],
   "apis": [
     {
       "name": "open",

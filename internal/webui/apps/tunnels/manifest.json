@@ -2,7 +2,10 @@
   "id": "tunnels",
   "name": "端口转发",
   "nameKey": "core.app.tunnels.name",
-  "languages": ["zh-CN", "en-US"],
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
   "version": "1.0.0",
   "description": "SSH 端口转发：打通本地与内网服务",
   "descriptionKey": "core.app.tunnels.desc",
@@ -10,15 +13,61 @@
   "icon": "tunnels",
   "category": "网络",
   "categoryKey": "core.category-network",
-  "keywords": ["tunnel", "port", "forward", "duankou"],
+  "keywords": [
+    "tunnel",
+    "port",
+    "forward",
+    "duankou"
+  ],
   "entry": "index.html",
-  "preferredSize": { "width": 830, "height": 560, "minWidth": 830, "minHeight": 320 },
-  "permissions": ["tunnel:local", "tunnel:tcp:local", "tunnel:tcp:remote", "tunnel:tcp:socks", "tunnel:udp:local", "tunnel:udp:socks", "tunnel:start", "tunnel:stop", "tunnel:tcp:stop", "tunnel:udp:stop", "tunnel:list", "hosts:read"],
+  "preferredSize": {
+    "width": 830,
+    "height": 560,
+    "minWidth": 830,
+    "minHeight": 320
+  },
+  "permissions": [
+    "tunnel:local",
+    "tunnel:tcp:local",
+    "tunnel:tcp:remote",
+    "tunnel:tcp:socks",
+    "tunnel:udp:local",
+    "tunnel:udp:socks",
+    "tunnel:start",
+    "tunnel:stop",
+    "tunnel:tcp:stop",
+    "tunnel:udp:stop",
+    "tunnel:list",
+    "hosts:read",
+    "hosts:preconnect"
+  ],
   "apis": [
-    { "name": "create", "description": "Start a tunnel: { hostId?, type: 'local'|'remote'|'dynamic'|'udp', bind?, port, target? } -> registry entry (port 0 = pick a free one; udp ships a relay to the remote temp dir and forwards datagrams over SSH)", "version": "3", "launch": "background", "perm": "tunnel:local" },
-    { "name": "stop", "description": "Stop a tunnel by id: { id }", "version": "1", "launch": "background", "perm": "tunnel:local" },
-    { "name": "list", "description": "List tunnels of the current workspace (no args)", "version": "1", "launch": "background", "perm": "tunnel:list" },
-    { "name": "whereami", "description": "Current workspace of the tunnels window (no args)", "version": "1" }
+    {
+      "name": "create",
+      "description": "Start a tunnel: { hostId?, type: 'local'|'remote'|'dynamic'|'udp', bind?, port, target? } -> registry entry (port 0 = pick a free one; udp ships a relay to the remote temp dir and forwards datagrams over SSH)",
+      "version": "3",
+      "launch": "background",
+      "perm": "tunnel:local"
+    },
+    {
+      "name": "stop",
+      "description": "Stop a tunnel by id: { id }",
+      "version": "1",
+      "launch": "background",
+      "perm": "tunnel:local"
+    },
+    {
+      "name": "list",
+      "description": "List tunnels of the current workspace (no args)",
+      "version": "1",
+      "launch": "background",
+      "perm": "tunnel:list"
+    },
+    {
+      "name": "whereami",
+      "description": "Current workspace of the tunnels window (no args)",
+      "version": "1"
+    }
   ],
   "systemApp": true,
   "disableable": true

@@ -221,6 +221,22 @@ var (
 	disableableSystemAppID = disableableIDsFrom(systemApps)
 )
 
+// systemAppPermSets 缓存内置应用 manifest 声明的权限集（已归一化）。
+// 内置应用不再签发/判定全量权限，而是按声明最小化（QX-019）。
+var systemAppPermSets = func() map[string]map[string]bool {
+	out := make(map[string]map[string]bool, len(systemApps))
+	for _, m := range systemApps {
+		set := make(map[string]bool, len(m.Permissions))
+		for _, p := range m.Permissions {
+			if n := PermNormalize(p); n != "" {
+				set[n] = true
+			}
+		}
+		out[m.ID] = set
+	}
+	return out
+}()
+
 // loadSystemApps 扫描嵌入 FS 的 apps/*/manifest.json，只收录 systemApp=true 的清单；
 // id 缺省取目录名。内置清单的 apis 不合法属于开发事故，直接 panic 拒绝启动。
 func loadSystemApps() []appManifest {

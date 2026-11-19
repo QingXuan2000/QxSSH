@@ -283,8 +283,12 @@ func truncStr(s string, max int) string {
 }
 
 func (a *Gateway) permAllowed(appID, perm string) bool {
-	if appID == hostApp || systemAppIDs[appID] {
+	if appID == hostApp {
 		return true
+	}
+	if systemAppIDs[appID] {
+		// 内置应用按 manifest 声明判定，与 appScope 签发的 scope 一致（QX-019）。
+		return systemAppPermSets[appID][PermNormalize(perm)]
 	}
 	if permIsDefault(perm) {
 		return true

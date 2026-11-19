@@ -326,8 +326,16 @@ function ensureGrants(entry) {
 
 async function requirePermission(entry, need) {
   const raw = (Array.isArray(need) ? need : [need]).map(String).filter(Boolean);
-  if (!raw.length || entry.system) return true;
+  if (!raw.length) return true;
   const keys = await normalizeNeed(raw);
+  if (entry.system) {
+    // 内置应用不再 blanket 豁免：按 manifest 声明的权限集判定（QX-019），
+    // 与后端 appScope/permAllowed 的最小权限化保持一致。
+    const app = entry.ctx.appId ? getApps().find((a) => a.id === entry.ctx.appId) : null;
+    const declared = await normalizeNeed((app && app.permissions) || []);
+    const set = new Set(declared);
+    return keys.every((k) => set.has(k));
+  }
   const granted = await ensureGrants(entry);
   if (granted === null || keys.every((k) => granted.has(k))) return true;
   return askPermission(entry, keys);
@@ -1124,7 +1132,7 @@ async function routeApiCall(entry, d) {
     return;
   }
 
-  if (decl && decl.perm && !entry.system) {
+  if (decl && decl.perm) {
     const ok = await requirePermission(entry, decl.perm);
     if (!frames.has(entry)) return;
     if (!ok) {
@@ -1233,7 +1241,7 @@ function armSilentIdle(entry) {
 
 function dispatchApiCall(reqId, from, target, api, args, timeout) {
   const perm = apiPermOf(target, target.ctx.appId, api);
-  if (!perm || from.system) {
+  if (!perm) {
     deliverApiCall(reqId, from, target, api, args, timeout);
     return;
   }

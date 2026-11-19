@@ -580,11 +580,21 @@ func (a *Gateway) tokenAllows(app, need string, c *idpClaims) bool {
 }
 
 // appScope 把某应用「当前实际拥有的权限」折算成令牌 scope。
-// 结果必须与 permAllowed 的判定完全一致：宿主/内置应用给全量，
-// 其余给「默认权限 + 已授权权限」，保证换成令牌后授权结论不变。
+// 结果必须与 permAllowed 的判定完全一致：宿主给全量，内置应用给
+// manifest 声明的最小集（QX-019），其余给「默认权限 + 已授权权限」，
+// 保证换成令牌后授权结论不变。
 func (a *Gateway) appScope(app string) []string {
-	if app == hostApp || systemAppIDs[app] {
+	if app == hostApp {
 		return permIDs()
+	}
+	if systemAppIDs[app] {
+		set := systemAppPermSets[app]
+		out := make([]string, 0, len(set))
+		for p := range set {
+			out = append(out, p)
+		}
+		sort.Strings(out)
+		return out
 	}
 	seen := make(map[string]bool, 8)
 	out := make([]string, 0, 8)
