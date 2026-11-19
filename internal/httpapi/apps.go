@@ -678,7 +678,7 @@ func (a *Gateway) handleValidateApp(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		cacheDir, _, err := cloneOrGetCachedGitRepo(ctx, cleanURL, cleanBr)
+		cacheDir, _, err := cloneOrGetCachedGitRepo(ctx, a.configDir, cleanURL, cleanBr)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
@@ -914,7 +914,8 @@ func normalizeAppIcon(spec appIconSpec, byName map[string]*zip.File) (appIconSpe
 
 // installAppZip 把校验通过的包解到 apps/<id>，覆盖同名旧版本；单个文件超 50MB
 // 或解压总量超 100MB 立即中止。写入磁盘前强制 SystemApp=false，防止第三方包
-// 伪装内置应用。
+// 伪装内置应用。解压按「声明值 + 剩余总预算」双重限流（QX-041）：声明值可谎报，
+// 实际读取超限即中止，不等写满磁盘；失败清理半解压目录。
 func (a *Gateway) installAppZip(r io.ReaderAt, size int64) (appManifest, error) {
 	m, byName, err := a.parseAppZip(r, size)
 	if err != nil {
@@ -926,47 +927,60 @@ func (a *Gateway) installAppZip(r io.ReaderAt, size int64) (appManifest, error) 
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return appManifest{}, err
 	}
+	fail := func(e error) (appManifest, error) {
+		_ = os.RemoveAll(root)
+		return appManifest{}, e
+	}
 	var total int64
 	for name, zf := range byName {
 		if name == "manifest.json" {
 			continue
 		}
 		if zf.UncompressedSize64 > maxAppZipBytes {
-			return appManifest{}, fmt.Errorf("文件 %q 过大", name)
+			return fail(fmt.Errorf("文件 %q 过大", name))
 		}
 		rc, err := zf.Open()
 		if err != nil {
-			return appManifest{}, err
+			return fail(err)
 		}
 		dest := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			rc.Close()
-			return appManifest{}, err
+			return fail(err)
 		}
 		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			rc.Close()
-			return appManifest{}, err
+			return fail(err)
 		}
-		n, err := io.Copy(out, rc)
+		// 双重限流：单文件不超声明值，累计不超总预算；多读 1 字节用于探测超限。
+		budget := maxAppZipBytes*2 - total
+		lim := int64(zf.UncompressedSize64)
+		if lim > budget {
+			lim = budget
+		}
+		n, err := io.Copy(out, io.LimitReader(rc, lim+1))
 		rc.Close()
 		out.Close()
 		if err != nil {
-			return appManifest{}, err
+			return fail(err)
+		}
+		if n > int64(zf.UncompressedSize64) {
+			return fail(fmt.Errorf("文件 %q 实际大小超出声明值（疑似 zip 炸弹）", name))
+		}
+		if n > budget {
+			return fail(errors.New("解压后总大小超出限制"))
 		}
 		total += n
-		if total > maxAppZipBytes*2 {
-			return appManifest{}, errors.New("解压后总大小超出限制")
-		}
 	}
 
 	m.SystemApp = false
 	mb, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return appManifest{}, err
+		return fail(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), mb, 0o644); err != nil {
-		return appManifest{}, err
+		return fail(err)
 	}
 	return m, nil
 }

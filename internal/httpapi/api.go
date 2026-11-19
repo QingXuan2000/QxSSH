@@ -57,6 +57,11 @@ type Gateway struct {
 	bgProcs map[string]*bgProc
 	bgSeq   uint64
 
+	// jobOwn 缓存远端后台任务的归属应用（host\x00jobID → appID），
+	// 用于 job/* 端点的归属校验（QX-030）；重启后由远端 meta 懒加载。
+	jobOwnMu sync.Mutex
+	jobOwn   map[string]string
+
 	audit *auditStore
 
 	appState *appState
@@ -96,6 +101,7 @@ func newGateway(store *config.Store, mgr *sshpool.Pool, tunnels *tunnel.Registry
 	a.hostTok = randTok()
 	a.deny = map[string]int64{}
 	a.bgProcs = map[string]*bgProc{}
+	a.jobOwn = map[string]string{}
 	a.wsSlots = make(chan struct{}, wsMaxSessions)
 	a.sftpClients = map[string]*sftpShared{}
 	a.appFileToks = map[string]string{}

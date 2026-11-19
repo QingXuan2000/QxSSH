@@ -142,7 +142,7 @@ func cleanSubPath(p string) (string, error) {
 
 // cloneOrGetCachedGitRepo 获取缓存的克隆目录，或执行浅克隆。纯 Go 实现，
 // 经 go-git 走 https/ssh 传输（协议白名单见 cleanGitURL），不依赖外部 git 命令。
-func cloneOrGetCachedGitRepo(ctx context.Context, rawURL, branch string) (string, string, error) {
+func cloneOrGetCachedGitRepo(ctx context.Context, configDir, rawURL, branch string) (string, string, error) {
 	cleanURL, err := cleanGitURL(rawURL)
 	if err != nil {
 		return "", "", err
@@ -154,7 +154,9 @@ func cloneOrGetCachedGitRepo(ctx context.Context, rawURL, branch string) (string
 
 	h := sha256.Sum256([]byte(cleanURL + "\x00" + cleanBr))
 	cacheKey := fmt.Sprintf("%x", h[:8])
-	cacheDir := filepath.Join(os.TempDir(), "qxssh-git-cache", cacheKey)
+	// 缓存放配置目录内（0700）而非共享 /tmp（QX-043）：共享临时目录下
+	// 名字可预测的缓存可被同机其他用户投毒，TTL 内会被无条件复用。
+	cacheDir := filepath.Join(configDir, "git-cache", cacheKey)
 
 	// 若存在近期缓存则直接复用
 	if fi, err := os.Stat(cacheDir); err == nil && fi.IsDir() {
@@ -164,8 +166,8 @@ func cloneOrGetCachedGitRepo(ctx context.Context, rawURL, branch string) (string
 	}
 
 	_ = os.RemoveAll(cacheDir)
-	if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
-		return "", "", fmt.Errorf("创建临时缓存目录失败: %w", err)
+	if err := os.MkdirAll(filepath.Dir(cacheDir), 0o700); err != nil {
+		return "", "", fmt.Errorf("创建缓存目录失败: %w", err)
 	}
 
 	opts := &git.CloneOptions{
@@ -387,7 +389,7 @@ func (a *Gateway) installAppFromGit(ctx context.Context, repoURL, branch, subPat
 		return appManifest{}, err
 	}
 
-	cacheDir, commit, err := cloneOrGetCachedGitRepo(ctx, cleanURL, cleanBr)
+	cacheDir, commit, err := cloneOrGetCachedGitRepo(ctx, a.configDir, cleanURL, cleanBr)
 	if err != nil {
 		return appManifest{}, err
 	}

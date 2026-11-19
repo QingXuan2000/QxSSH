@@ -152,6 +152,51 @@ func (a *Gateway) jobClient(w http.ResponseWriter, r *http.Request, host string)
 	return sshRunner{client: client}, true
 }
 
+// rememberJobOwner 记录任务归属（启动时与状态查询时写入缓存）。
+func (a *Gateway) rememberJobOwner(host, id, app string) {
+	a.jobOwnMu.Lock()
+	defer a.jobOwnMu.Unlock()
+	if len(a.jobOwn) > 4096 {
+		a.jobOwn = map[string]string{}
+	}
+	a.jobOwn[host+"\x00"+id] = app
+}
+
+// jobOwnerApp 取任务归属应用：先查本地缓存，未命中读远端 meta.json 一次。
+func (a *Gateway) jobOwnerApp(run cmdRunner, host, id string) (string, error) {
+	key := host + "\x00" + id
+	a.jobOwnMu.Lock()
+	app, ok := a.jobOwn[key]
+	a.jobOwnMu.Unlock()
+	if ok {
+		return app, nil
+	}
+	out, err := run.run(jobShellPrelude(id) + `cat "$d/meta.json" 2>/dev/null`)
+	if err != nil {
+		return "", err
+	}
+	var meta jobMeta
+	_ = json.Unmarshal([]byte(strings.TrimSpace(out)), &meta)
+	a.rememberJobOwner(host, id, meta.App)
+	return meta.App, nil
+}
+
+// requireJobOwner 校验调用者是任务归属应用或宿主（QX-030）：
+// 防止仅持 job:output（Danger 1）的应用读取/终止其他应用或宿主的任务。
+func (a *Gateway) requireJobOwner(w http.ResponseWriter, r *http.Request, run cmdRunner, host, id string) bool {
+	app, err := a.jobOwnerApp(run, host, id)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return false
+	}
+	caller := callerApp(r)
+	if caller == hostApp || (app != "" && caller == app) {
+		return true
+	}
+	writeErr(w, http.StatusForbidden, errors.New("不能操作其他应用的后台任务"))
+	return false
+}
+
 func (a *Gateway) startJob(run cmdRunner, app string, req jobStartReq) (jobStatus, error) {
 	if err := validateExecArgv(req.Argv); err != nil {
 		return jobStatus{}, err
@@ -177,6 +222,7 @@ func (a *Gateway) startJob(run cmdRunner, app string, req jobStartReq) (jobStatu
 	if pid <= 0 {
 		return jobStatus{}, errors.New("起任务失败：远端没有回 pid（目录不可写或 sh 不可用）")
 	}
+	a.rememberJobOwner(req.Host, id, app)
 	return jobStatus{ID: id, Name: name, App: app, Argv: req.Argv, Cwd: req.Cwd, Running: true, Pid: pid, StartedAt: meta.StartedAt}, nil
 }
 
@@ -226,6 +272,12 @@ func (a *Gateway) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
+	// 归属校验（QX-030）：状态里已带 meta.App，无需额外远端往返。
+	a.rememberJobOwner(r.URL.Query().Get("host"), id, st.App)
+	if caller := callerApp(r); caller != hostApp && (st.App == "" || caller != st.App) {
+		writeErr(w, http.StatusForbidden, errors.New("不能操作其他应用的后台任务"))
+		return
+	}
 	writeJSON(w, st)
 }
 
@@ -248,6 +300,9 @@ func (a *Gateway) handleJobOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	run, ok := a.jobClient(w, r, q.Get("host"))
 	if !ok {
+		return
+	}
+	if !a.requireJobOwner(w, r, run, q.Get("host"), id) {
 		return
 	}
 
@@ -302,6 +357,9 @@ func (a *Gateway) handleJobKill(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.requireJobOwner(w, r, run, req.Host, req.ID) {
+		return
+	}
 	cmd := jobShellPrelude(req.ID) + `pid=$(cat "$d/pid" 2>/dev/null); [ -n "$pid" ] || { echo NOPID; exit 0; }; ` +
 		`kill -` + sig + ` -- -"$pid" 2>/dev/null || kill -` + sig + ` "$pid" 2>/dev/null; echo OK`
 	out, err := run.run(cmd)
@@ -335,6 +393,10 @@ func (a *Gateway) handleJobList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if st, err := parseJobStatus(id, rest); err == nil {
+			// 列表按归属过滤（QX-030）：应用只见自己的任务，宿主见全部。
+			if caller := callerApp(r); caller != hostApp && (st.App == "" || caller != st.App) {
+				continue
+			}
 			jobs = append(jobs, st)
 		}
 	}
@@ -361,11 +423,17 @@ func (a *Gateway) handleJobRemove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.requireJobOwner(w, r, run, req.Host, req.ID) {
+		return
+	}
 	cmd := jobShellPrelude(req.ID) + `pid=$(cat "$d/pid" 2>/dev/null); [ -z "$pid" ] || [ -f "$d/exit" ] || kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; rm -rf -- "$d"; echo OK`
 	if _, err := run.run(cmd); err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
+	a.jobOwnMu.Lock()
+	delete(a.jobOwn, req.Host+"\x00"+req.ID)
+	a.jobOwnMu.Unlock()
 	writeJSON(w, okResp{OK: true})
 }
 
