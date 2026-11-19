@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
@@ -174,6 +175,13 @@ func openDB(path string) (*sql.DB, error) {
 	_, _ = db.Exec("ALTER TABLE app_refresh ADD COLUMN extra_scopes TEXT NOT NULL DEFAULT ''")
 	// 清理历史残留的临时授权数据（旧实现遗留的 consent_session，真·本次允许不再写入数据库）
 	_, _ = db.Exec("DELETE FROM app_scopes WHERE granted_by = 'consent_session' OR expires_at > 0")
+	// 收紧凭据库文件权限（QX-023）：属主可读写，其他用户无权。
+	// WAL/SHM 同样处理；Windows 上模式位作用有限，ACL 加固为后续项。
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(p); err == nil {
+			_ = os.Chmod(p, 0o600)
+		}
+	}
 	return db, nil
 }
 

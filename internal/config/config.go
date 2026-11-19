@@ -8,6 +8,7 @@ package config
 import (
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -84,6 +85,8 @@ func Load(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	// MkdirAll 不修正已存在目录的权限：显式收紧到 0700（QX-023）。
+	_ = os.Chmod(dir, 0o700)
 
 	db, err := openDB(dbPath(dir))
 	if err != nil {
@@ -1298,7 +1301,14 @@ type RefreshRow struct {
 	ExtraScopes string `json:"extraScopes,omitempty"`
 }
 
-// SaveRefresh 写入或更新一条刷新令牌记录。
+// refreshKey 把刷新令牌哈希后作为存储键（QX-024）：令牌本身是高熵随机串，
+// SHA-256 即可；读库不再等于拿到可用凭据。
+func refreshKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// SaveRefresh 写入或更新一条刷新令牌记录（令牌以哈希落库）。
 func (s *Store) SaveRefresh(r RefreshRow) error {
 	if r.Token == "" {
 		return errors.New("刷新令牌不能为空")
@@ -1311,43 +1321,59 @@ func (s *Store) SaveRefresh(r RefreshRow) error {
 			app_id = excluded.app_id, jti = excluded.jti, rot_from = excluded.rot_from,
 			exp = excluded.exp, revoked = excluded.revoked, last_use = excluded.last_use,
 			extra_scopes = excluded.extra_scopes`,
-		r.Token, r.AppID, r.JTI, r.RotFrom, r.Exp, boolToInt(r.Revoked), r.LastUse, r.CreatedAt, r.ExtraScopes)
+		refreshKey(r.Token), r.AppID, r.JTI, refreshKey(r.RotFrom), r.Exp, boolToInt(r.Revoked), r.LastUse, r.CreatedAt, r.ExtraScopes)
 	return err
 }
 
 // GetRefresh 取一条刷新令牌记录；不存在时 ok 为 false。
+// 兼容旧版明文存储：哈希未命中时回退明文查询，命中即把该行迁移为哈希键。
+// 返回的 RefreshRow.Token 恢复为调用方出示的原始令牌，保持上层语义不变。
 func (s *Store) GetRefresh(token string) (RefreshRow, bool) {
 	if token == "" {
 		return RefreshRow{}, false
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	var (
 		r       RefreshRow
 		revoked int
 	)
 	err := s.db.QueryRow(`SELECT token, app_id, jti, rot_from, exp, revoked, last_use, created_at, COALESCE(extra_scopes, '')
+		FROM app_refresh WHERE token = ?`, refreshKey(token)).
+		Scan(&r.Token, &r.AppID, &r.JTI, &r.RotFrom, &r.Exp, &revoked, &r.LastUse, &r.CreatedAt, &r.ExtraScopes)
+	if err == nil {
+		s.mu.RUnlock()
+		r.Revoked = revoked != 0
+		r.Token = token
+		return r, true
+	}
+	// 旧版明文行回退（QX-024 迁移）。
+	err = s.db.QueryRow(`SELECT token, app_id, jti, rot_from, exp, revoked, last_use, created_at, COALESCE(extra_scopes, '')
 		FROM app_refresh WHERE token = ?`, token).
 		Scan(&r.Token, &r.AppID, &r.JTI, &r.RotFrom, &r.Exp, &revoked, &r.LastUse, &r.CreatedAt, &r.ExtraScopes)
+	s.mu.RUnlock()
 	if err != nil {
 		return RefreshRow{}, false
 	}
+	s.mu.Lock()
+	_, _ = s.db.Exec(`UPDATE app_refresh SET token = ? WHERE token = ?`, refreshKey(token), token)
+	s.mu.Unlock()
 	r.Revoked = revoked != 0
+	r.Token = token
 	return r, true
 }
 
-// RevokeRefreshToken 把单枚刷新令牌置为已吊销。
+// RevokeRefreshToken 把单枚刷新令牌置为已吊销（哈希键与旧明文键都覆盖）。
 func (s *Store) RevokeRefreshToken(token string) error {
 	if token == "" {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token = ?`, token)
+	_, err := s.db.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token IN (?, ?)`, refreshKey(token), token)
 	return err
 }
 
-// RotateRefresh 把旧刷新令牌置为「已轮换」并写入新记录。
+// RotateRefresh 把旧刷新令牌置为「已轮换」并写入新记录（令牌以哈希落库）。
 // 两者在同一事务里完成，避免中途失败留下「旧令牌仍有效、新令牌不存在」的窗口。
 func (s *Store) RotateRefresh(old string, nr RefreshRow) error {
 	if old == "" || nr.Token == "" {
@@ -1359,14 +1385,14 @@ func (s *Store) RotateRefresh(old string, nr RefreshRow) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token = ?`, old); err != nil {
+	if _, err := tx.Exec(`UPDATE app_refresh SET revoked = 1 WHERE token IN (?, ?)`, refreshKey(old), old); err != nil {
 		tx.Rollback()
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO app_refresh (token, app_id, jti, rot_from, exp, revoked, last_use, created_at, extra_scopes)
 		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
 		ON CONFLICT(token) DO UPDATE SET rot_from = excluded.rot_from, exp = excluded.exp, last_use = excluded.last_use, extra_scopes = excluded.extra_scopes`,
-		nr.Token, nr.AppID, nr.JTI, nr.RotFrom, nr.Exp, nr.LastUse, nr.CreatedAt, nr.ExtraScopes); err != nil {
+		refreshKey(nr.Token), nr.AppID, nr.JTI, refreshKey(nr.RotFrom), nr.Exp, nr.LastUse, nr.CreatedAt, nr.ExtraScopes); err != nil {
 		tx.Rollback()
 		return err
 	}
