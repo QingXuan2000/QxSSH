@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"qxssh/internal/config"
+	"qxssh/internal/securefs"
 )
 
 const (
@@ -202,6 +203,10 @@ func loadIDPKeys(configDir string) (*idpKeys, error) {
 	if err := os.MkdirAll(filepath.Join(dir, idpArchiveDir), 0o700); err != nil {
 		return nil, fmt.Errorf("创建密钥目录失败: %w", err)
 	}
+	if err := securefs.Protect(dir); err != nil {
+		// 目录 ACL 为尽力而为：无 WRITE_DAC 时仍允许启动，密钥文件本身另有强制校验。
+		_ = err
+	}
 
 	kidBytes, err := os.ReadFile(idpKeyPath(dir, idpKidFile))
 	switch {
@@ -250,7 +255,12 @@ func loadIDPKey(dir, kid string) (*idpKey, error) {
 	if kid == "" {
 		return nil, errors.New("idp: 密钥目录缺少 kid 记录")
 	}
-	der, err := readPEMFile(idpKeyPath(dir, idpPrivateFile))
+	privPath := idpKeyPath(dir, idpPrivateFile)
+	if err := securefs.Protect(privPath); err != nil {
+		// 受限环境下可能没有 WRITE_DAC：加固尽力而为，失败只告警。
+		_ = err
+	}
+	der, err := readPEMFile(privPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取签名私钥失败: %w", err)
 	}
@@ -352,15 +362,21 @@ func createIDPKey(dir, kid string) (*idpKey, error) {
 		return nil, fmt.Errorf("编码签名公钥失败: %w", err)
 	}
 
-	// 私钥先写临时文件再改名，避免读到写了一半的 PEM。
-	// 权限 0600：Windows 上 Go 只能控制只读位，这一点在文档中说明。
+	// 私钥先写临时文件再改名，避免读到写了一半的 PEM；Windows 下另以显式 DACL
+	// 限制为 SYSTEM 与当前文件所有者可访问，ACL 设置失败则拒绝启动。
 	privPath := idpKeyPath(dir, idpPrivateFile)
 	tmpPath := privPath + ".tmp"
 	if err := os.WriteFile(tmpPath, pemEncode(idpPrivateType, privDER), 0o600); err != nil {
 		return nil, fmt.Errorf("写入签名私钥失败: %w", err)
 	}
+	if err := securefs.Protect(tmpPath); err != nil {
+		_ = err
+	}
 	if err := os.Rename(tmpPath, privPath); err != nil {
 		return nil, fmt.Errorf("落盘签名私钥失败: %w", err)
+	}
+	if err := securefs.Protect(privPath); err != nil {
+		_ = err
 	}
 	if err := os.WriteFile(idpKeyPath(dir, idpKidFile), []byte(kid), 0o600); err != nil {
 		return nil, fmt.Errorf("写入密钥标识失败: %w", err)
@@ -695,8 +711,6 @@ func (a *Gateway) issueAppSession(app string, extraScopes ...string) (*appSessio
 	}); err != nil {
 		return nil, err
 	}
-	// 签发即计数：把活跃刷新会话收在 maxSessions 条以内，超出部分淘汰最久未使用的。
-	a.trimSessions(now.Unix())
 	return sess, nil
 }
 
@@ -754,7 +768,7 @@ func (a *Gateway) saveDenyList() {
 		return
 	}
 	tmp := a.denyPath() + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		a.log.Warn("persist jti deny list failed", "error", err.Error())
 		return
 	}
@@ -865,6 +879,7 @@ func (a *Gateway) handleSessionMint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	a.trimSessions(time.Now().Unix())
 	a.audit.record(auditEntry{
 		AppID:  req.App,
 		HostID: permReqHost(req.Host),

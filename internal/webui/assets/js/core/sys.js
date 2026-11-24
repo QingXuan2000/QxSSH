@@ -127,11 +127,35 @@ export function sysPut(target, body) {
   return sysFetch('PUT', target, { body });
 }
 
-/** 拼接带会话令牌的普通请求地址 */
+/**
+ * 是否为宿主控制台页面（令牌来自注入的 meta 标签）。
+ * 应用 iframe 的令牌来自桥接（bridge.session），两者必须区分：
+ * 宿主用同源 Cookie 免令牌下载，应用仍用自己的令牌，避免借用宿主身份。
+ */
+function isHostConsole() {
+  if (bridge && bridge.session) return false;
+  try {
+    const m = document.querySelector('meta[name="qx-session"]');
+    return !!(m && m.content);
+  } catch { return false; }
+}
+
+/**
+ * 拼接同源下载/预览地址（QXS-30）。
+ *
+ * 宿主控制台不再把会话令牌拼进查询串：令牌进入 URL 会留在浏览历史、Referer 与
+ * 下游访问日志里。后端在收到宿主 X-Qx-Session 时会写入同源 HttpOnly Cookie
+ * （SameSite=Strict），<a href> / iframe / img 这类无法附加请求头的同源请求
+ * 会由浏览器自动带上凭据。
+ *
+ * 应用 iframe 保持原行为：显式携带自己的令牌，绝不借用宿主 Cookie 提权。
+ */
 export function sysUrl(target, query = {}) {
-  const tok = sessionToken();
   const q = { ...query };
-  if (tok) q.session = tok;
+  if (!isHostConsole()) {
+    const tok = sessionToken();
+    if (tok) q.session = tok;
+  }
   return `${API_BASE}/${target}${buildQuery(q)}`;
 }
 

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -238,20 +237,18 @@ func elevatedClient(client *ssh.Client, info elevatedInfo, password string) (*sf
 	}
 	needPassword := info.UID != 0 && !info.Nopass
 
-	detail := ""
 	for _, command := range attempts {
-		sc, done, d := tryElevated(client, command, password)
-		if d == "" {
+		sc, done, _ := tryElevated(client, command, password)
+		if sc != nil {
 			return sc, done, nil
 		}
-		detail = d
 	}
-	env := fmt.Sprintf("uname=%s, uid=%d, sudo=%s, server=%s",
-		orDash(info.Uname), info.UID, orDash(info.SudoBin), orDash(info.Server))
+	// 远端环境细节（uname / uid / sudo 路径 / sftp-server 路径）不回显给调用方：
+	// 它们是攻击者枚举远端提权面的地图（QXS-31）。这里只保留归类错误。
 	if needPassword {
-		return nil, nil, fmt.Errorf("%w：%s（环境：%s）", errElevSession, detail, env)
+		return nil, nil, fmt.Errorf("%w：管理员模式会话建立失败（可能密码错误或远端 sudo 拒绝）", errElevSession)
 	}
-	return nil, nil, fmt.Errorf("%s（环境：%s）", detail, env)
+	return nil, nil, errors.New("管理员模式会话建立失败（远端 sudo 或 sftp-server 不可用）")
 }
 
 type (
@@ -611,23 +608,30 @@ func (a *Gateway) handleSftpDownload(w http.ResponseWriter, r *http.Request) {
 
 	name := path.Base(p)
 
-	disp := "attachment"
-	if r.URL.Query().Get("inline") == "1" {
-		disp = "inline"
-		if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
-			w.Header().Set("Content-Type", ct)
-		} else {
-			w.Header().Set("Content-Type", "application/octet-stream")
-		}
+	// QXS-01：预览/下载统一走内容投递策略。攻击者可控的 .html/.svg 不再以
+	// 控制台同源文档的身份渲染；inline 仅对不可执行白名单开放，并强制 CSP sandbox。
+	probe := &contentProbe{head: make([]byte, 512)}
+	if n, _ := io.ReadFull(f, probe.head); n > 0 {
+		probe.head = probe.head[:n]
 	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
+		probe.head = nil
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disp, name))
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		// 无法回卷时退回纯扩展名判定（更保守）。
+		probe = nil
+	}
+	deliverFile(w.Header(), name, extOf(name), r.URL.Query().Get("inline") == "1", probe)
 	if fi.Size() > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	}
 	_, _ = io.Copy(w, f)
 }
+
+const (
+	sftpArchiveMaxDepth   = 32
+	sftpArchiveMaxEntries = 100000
+	sftpArchiveMaxBytes   = 512 << 20
+)
 
 func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client, dirPath, dirName, format string) {
 	if dirName == "" || dirName == "." || dirName == "/" {
@@ -641,13 +645,22 @@ func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client,
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
-	var writeDir func(curPath, relPrefix string) error
-	writeDir = func(curPath, relPrefix string) error {
+	var entriesWritten int
+	var totalBytes int64
+	var writeDir func(curPath, relPrefix string, depth int) error
+	writeDir = func(curPath, relPrefix string, depth int) error {
+		if depth > sftpArchiveMaxDepth {
+			return errors.New("目录归档超过最大深度")
+		}
 		entries, err := sc.ReadDir(curPath)
 		if err != nil {
 			return err
 		}
 		for _, e := range entries {
+			entriesWritten++
+			if entriesWritten > sftpArchiveMaxEntries {
+				return errors.New("目录归档条目数超过上限")
+			}
 			subPath := path.Join(curPath, e.Name())
 			subRel := path.Join(relPrefix, e.Name())
 			if e.IsDir() {
@@ -660,10 +673,13 @@ func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client,
 				if err := tw.WriteHeader(hdr); err != nil {
 					return err
 				}
-				if err := writeDir(subPath, subRel); err != nil {
+				if err := writeDir(subPath, subRel, depth+1); err != nil {
 					return err
 				}
 			} else {
+				if e.Size() < 0 || e.Size() > sftpArchiveMaxBytes-totalBytes {
+					return errors.New("目录归档数据量超过上限")
+				}
 				hdr := &tar.Header{
 					Name:     subRel,
 					Mode:     int64(e.Mode().Perm()),
@@ -676,9 +692,13 @@ func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client,
 				}
 				f, err := sc.Open(subPath)
 				if err != nil {
-					continue
+					return err
 				}
-				_, _ = io.Copy(tw, f)
+				if _, err := io.CopyN(tw, f, e.Size()); err != nil {
+					_ = f.Close()
+					return err
+				}
+				totalBytes += e.Size()
 				_ = f.Close()
 			}
 		}
@@ -691,7 +711,7 @@ func (a *Gateway) streamDirectoryArchive(w http.ResponseWriter, sc *sftp.Client,
 		ModTime:  time.Now(),
 		Typeflag: tar.TypeDir,
 	})
-	if err := writeDir(dirPath, dirName); err != nil {
+	if err := writeDir(dirPath, dirName, 0); err != nil {
 		a.log.Warn("stream directory archive interrupted", "dir", dirPath, "error", err.Error())
 	}
 }
@@ -822,8 +842,8 @@ func (a *Gateway) handleSftpUpload(w http.ResponseWriter, r *http.Request) {
 	target := dest
 	if st, err := sc.Stat(dest); err == nil && st.IsDir() {
 
-		name := path.Clean(hdr.Filename)
-		if name == "." || name == ".." || strings.Contains(name, "/") {
+		name := path.Clean(strings.ReplaceAll(hdr.Filename, "\\", "/"))
+		if name == "." || name == ".." || strings.Contains(name, "/") || strings.Contains(name, ":") || strings.IndexFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 			writeOpErr(w, errors.New("上传文件名非法"))
 			return
 		}
@@ -934,44 +954,25 @@ func atoiU32(s string) uint32 {
 
 var selinuxRe = regexp.MustCompile(`^[A-Za-z_][\w.-]*:[\w.-]+:[\w.-]+(:[\w.,:-]+)?$`)
 
-func (a *Gateway) fillUnixAttrs(hostID, p string, res *statResult) {
-	client, err := a.mgr.Get(hostID)
-	if err != nil {
-		res.Note = "无法读取详细属性：" + err.Error()
+// fillUnixAttrs 用 SFTP 元数据本地推导扩展属性（QXS-28）。
+//
+// 旧实现在远端执行 `stat -c` / `ls -ldZ` 取属主名、八进制权限与 SELinux 上下文，
+// 这使「只读元数据」的 Danger-1 权限等价于「可在远端跑进程」，绕开了统一的
+// sftpClient 入口。现在完全由已拿到的 FileStat 计算，不再发起任何远端命令；
+// 属主/组只显示数字 ID，SELinux 上下文不再提供。
+func fillUnixAttrs(fi os.FileInfo, res *statResult) {
+	if fi == nil {
 		return
 	}
-	q := shellQuote(p)
-
-	out, _ := runSSHCmd(client, "LC_ALL=C stat -c '%U|%G|%u|%g|%a|%s|%F|%y|%C' -- "+q+" 2>/dev/null")
-	f := strings.SplitN(strings.TrimSpace(firstLine(out)), "|", 9)
-	if len(f) == 9 && strings.TrimSpace(f[0]) != "" {
-		res.Owner = strings.TrimSpace(f[0])
-		res.Group = strings.TrimSpace(f[1])
-		res.UID, res.GID = atoiU32(f[2]), atoiU32(f[3])
-		res.PermOct = strings.TrimSpace(f[4])
-		if c := strings.TrimSpace(f[8]); c != "" && c != "?" {
-			res.SELinux = c
+	res.PermOct = fmt.Sprintf("%04o", fi.Mode().Perm())
+	if st, ok := fi.Sys().(*sftp.FileStat); ok {
+		if res.Owner == "" {
+			res.Owner = strconv.FormatUint(uint64(st.UID), 10)
 		}
-		return
+		if res.Group == "" {
+			res.Group = strconv.FormatUint(uint64(st.GID), 10)
+		}
 	}
-
-	for _, args := range []string{"ls -ldZ -- ", "ls -ld -- "} {
-		o, _ := runSSHCmd(client, "LC_ALL=C "+args+q+" 2>/dev/null")
-		line := strings.TrimSpace(firstLine(o))
-		cols := strings.Fields(line)
-		if len(cols) < 4 || len(cols[0]) < 10 {
-			continue
-		}
-		res.Owner, res.Group = cols[2], cols[3]
-		for i := 4; i < len(cols); i++ {
-			if c := strings.TrimSuffix(cols[i], "."); selinuxRe.MatchString(c) {
-				res.SELinux = c
-				break
-			}
-		}
-		return
-	}
-	res.Note = "该服务器不支持 stat / ls -l，仅显示基础属性"
 }
 
 func (a *Gateway) handleSftpStat(w http.ResponseWriter, r *http.Request) {
@@ -1004,7 +1005,7 @@ func (a *Gateway) handleSftpStat(w http.ResponseWriter, r *http.Request) {
 			res.IsDir, res.Size = tf.IsDir(), tf.Size()
 		}
 	}
-	a.fillUnixAttrs(req.Host, p, &res)
+	fillUnixAttrs(fi, &res)
 	writeJSON(w, res)
 }
 

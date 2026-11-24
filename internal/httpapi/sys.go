@@ -98,10 +98,9 @@ func (a *Gateway) sysDispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostID := peekHostID(r)
-
 	tok := sessionHeaderToken(r)
 	var app string
+	var hostID string
 	var claims *idpClaims
 	if !e.pub {
 		// 应用 JWT 自带 scope，验签即完成「是谁 + 能做什么」两项判定；
@@ -148,6 +147,16 @@ func (a *Gateway) sysDispatch(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		app = a.sessionApp(tok)
+	}
+	if !e.pub {
+		// QXS-32：审计工作区分组只能来自真实存在的主机。host 查询参数由调用方
+		// 控制，若原样入账，普通应用就能把记录写进任意（含宿主）工作区分组，
+		// 误导取证。不存在的 ID 一律不计入分组。
+		if id := peekHostID(r); id != "" {
+			if _, ok := a.store.GetHost(id); ok {
+				hostID = id
+			}
+		}
 	}
 	if app != "" {
 		r = r.WithContext(context.WithValue(r.Context(), sysAppKey{}, app))
@@ -304,12 +313,16 @@ func (a *Gateway) permAllowed(appID, perm string) bool {
 
 // permSubstitutes 列出可代偿某个表项权限的细粒度 scope。
 // 表项键只决定审计标签，实际授权可以是这些具体节点中的任意一个。
+//
+// 这里列出的每个键都必须是 permCatalog 中真实存在的 scope（QXS-42）：
+// 曾混入 `tunnel:tun` / `tunnel:tun:stop` 两个目录外的键，既永远不可能被授权，
+// 也会误导维护者以为存在这样一条权限。
 func permSubstitutes(perm string) []string {
 	switch perm {
 	case "tunnel:start":
-		return []string{"tunnel:local", "tunnel:tun", "tunnel:tcp:local", "tunnel:tcp:remote", "tunnel:tcp:socks", "tunnel:udp:local", "tunnel:udp:socks"}
+		return []string{"tunnel:local", "tunnel:tcp:local", "tunnel:tcp:remote", "tunnel:tcp:socks", "tunnel:udp:local", "tunnel:udp:socks"}
 	case "tunnel:stop":
-		return []string{"tunnel:local", "tunnel:tun", "tunnel:tun:stop", "tunnel:tcp:stop", "tunnel:udp:stop"}
+		return []string{"tunnel:local", "tunnel:tcp:stop", "tunnel:udp:stop"}
 	case "exec:run", "exec:stream", "exec:session":
 		return []string{"local:exec"}
 	}

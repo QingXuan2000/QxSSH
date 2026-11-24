@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -245,12 +244,11 @@ func (a *Gateway) handleStoreRead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("不是文件"))
 		return
 	}
-	ct := mime.TypeByExtension(filepath.Ext(target))
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// QXS-02：应用私有存储的内容由应用自己写入，绝不能以同源文档身份渲染。
+	// 统一策略：默认 application/octet-stream + attachment；只有不可执行白名单
+	// 允许 inline，且 inline 一律附加 CSP sandbox。
+	deliverFile(w.Header(), filepath.Base(target), extOf(target), wantsInline(r), probeHead(f, st.Size()))
+	_, _ = f.Seek(0, io.SeekStart)
 	http.ServeContent(w, r, filepath.Base(target), st.ModTime(), f)
 }
 
@@ -558,12 +556,10 @@ func (a *Gateway) handleLocalRead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("不是文件"))
 		return
 	}
-	ct := mime.TypeByExtension(filepath.Ext(target))
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// QXS-03：宿主机任意路径的读取同样不能按扩展名回填 Content-Type，
+	// 否则低权限本地用户可写的 .html/.svg 会变成控制台同源页面。
+	deliverFile(w.Header(), filepath.Base(target), extOf(target), wantsInline(r), probeHead(f, st.Size()))
+	_, _ = f.Seek(0, io.SeekStart)
 	http.ServeContent(w, r, filepath.Base(target), st.ModTime(), f)
 }
 

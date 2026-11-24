@@ -74,6 +74,7 @@ func (a *Gateway) handleStartTunnel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, errors.New("tunnels registry not configured"))
 		return
 	}
+	req.Owner = callerApp(r)
 	it, err := a.tunnels.Start(req)
 	if err != nil {
 		writeOpErr(w, err)
@@ -95,7 +96,9 @@ func (a *Gateway) handleListTunnels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, tunnelsResp{Tunnels: []tunnel.Running{}})
 		return
 	}
-	writeJSON(w, tunnelsResp{Tunnels: a.tunnels.List()})
+	owner := callerApp(r)
+	all := owner == hostApp || systemAppIDs[owner]
+	writeJSON(w, tunnelsResp{Tunnels: a.tunnels.List(owner, all)})
 }
 
 func (a *Gateway) handleStopTunnel(w http.ResponseWriter, r *http.Request) {
@@ -114,14 +117,21 @@ func (a *Gateway) handleStopTunnel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, errors.New("tunnels registry not configured"))
 		return
 	}
-	cur, known := a.tunnels.Get(req.ID)
-	need := tunnelStopPerms(cur, known)
+	owner := callerApp(r)
+	all := owner == hostApp || systemAppIDs[owner]
+	cur, known := a.tunnels.Get(req.ID, owner, all)
+	if !known {
+		writeErr(w, http.StatusNotFound, errors.New("tunnel not found"))
+		return
+	}
+	need := tunnelStopPerms(cur, true)
 	if !a.permAllowedAny(callerApp(r), need...) {
 		writePermErr(w, need)
 		return
 	}
-	if err := a.tunnels.Stop(req.ID); err != nil {
-		a.log.Info("tunnel stop skipped", "id", req.ID, "error", err.Error())
+	if err := a.tunnels.Stop(req.ID, owner, all); err != nil {
+		writeErr(w, http.StatusNotFound, errors.New("tunnel not found"))
+		return
 	}
 	a.log.Info("tunnel stopped", "id", req.ID)
 	writeJSON(w, okResp{OK: true})

@@ -23,6 +23,27 @@ func (a *Gateway) sudoAuthAllowed(host string) bool {
 	defer a.sudoMu.Unlock()
 	now := time.Now()
 	cutoff := now.Add(-sudoAttemptWindow)
+	if len(a.sudoAttempts) > 1024 {
+		for key, times := range a.sudoAttempts {
+			keptTimes := times[:0]
+			for _, t := range times {
+				if t.After(cutoff) {
+					keptTimes = append(keptTimes, t)
+				}
+			}
+			if len(keptTimes) == 0 {
+				delete(a.sudoAttempts, key)
+			} else {
+				a.sudoAttempts[key] = keptTimes
+			}
+		}
+		for len(a.sudoAttempts) > 1024 {
+			for key := range a.sudoAttempts {
+				delete(a.sudoAttempts, key)
+				break
+			}
+		}
+	}
 	kept := a.sudoAttempts[host][:0]
 	for _, t := range a.sudoAttempts[host] {
 		if t.After(cutoff) {
@@ -117,6 +138,14 @@ func (a *Gateway) handleSudoAuth(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !safeHostID(req.Host) {
+		writeErr(w, http.StatusBadRequest, errors.New("host 无效"))
+		return
+	}
+	if _, ok := a.store.GetHost(req.Host); !ok {
+		writeErr(w, http.StatusNotFound, errors.New("host not found"))
+		return
+	}
 	if strings.ContainsAny(req.Password, "\r\n") {
 		writeErr(w, http.StatusBadRequest, errors.New("密码不能包含换行符"))
 		return
@@ -178,6 +207,9 @@ func (a *Gateway) handleSudoAuth(w http.ResponseWriter, r *http.Request) {
 
 		env := fmt.Sprintf("uname=%s, uid=%d, sudo=%s", orDash(info.Uname), info.UID, orDash(info.SudoBin))
 		text := strings.TrimSpace(out)
+		if req.Password != "" {
+			text = strings.ReplaceAll(text, req.Password, "[REDACTED]")
+		}
 		switch {
 		case hasLine(text, ok):
 			a.setSudoPassword(callerApp(r), req.Host, req.Password)

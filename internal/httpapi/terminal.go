@@ -200,8 +200,16 @@ func (a *Gateway) serveSessionWS(w http.ResponseWriter, r *http.Request, hostID,
 		a.log.Debug("terminal COLORTERM not accepted by sshd (AcceptEnv)", "error", err.Error())
 	}
 
+	// QXS-37：stdinInit 非空意味着我们要在会话开始前预喂一段秘密（目前只有
+	// sudo 密码）。此时必须关闭 pty 回显，否则密码会被远端回显、经 wsPump 送回
+	// 客户端并留在滚动缓冲区/日志里。交互式终端走 command=="" 分支，stdinInit
+	// 恒为空，因此不会误关用户按键回显。
+	echo := uint32(1)
+	if stdinInit != "" {
+		echo = 0
+	}
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,
+		ssh.ECHO:          echo,
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}

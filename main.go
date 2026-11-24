@@ -5,6 +5,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -84,6 +85,8 @@ func run() int {
 	logLevel := flag.String("log-level", os.Getenv("QXSSH_LOG_LEVEL"), "log level: debug|info|warn|error|silent")
 	logFile := flag.String("log-file", os.Getenv("QXSSH_LOG_FILE"), "log file path; 'auto' = <conf>/logs/qxssh.log; empty = stdout only")
 	authToken := flag.String("auth-token", os.Getenv("QXSSH_AUTH_TOKEN"), "optional auth token for remote access; empty = no auth")
+	tlsCert := flag.String("tls-cert", os.Getenv("QXSSH_TLS_CERT"), "TLS certificate file (PEM); with -tls-key enables HTTPS")
+	tlsKey := flag.String("tls-key", os.Getenv("QXSSH_TLS_KEY"), "TLS private key file (PEM)")
 	kidRotate := flag.Bool("kid-rotate", false, "rotate the IdP signing key at startup; the old key is kept for token verification")
 	flag.Parse()
 
@@ -100,6 +103,28 @@ func run() int {
 				"无鉴权地暴露到网络会把全部主机凭据与命令执行能力公开给任何能访问该地址的人。\n"+
 				"请配置鉴权令牌后重试，或改用回环地址（127.0.0.1）。\n", *addr)
 		return 1
+	}
+
+	// TLS（QXS-41）：远程部署时鉴权令牌与主机凭据都不该以明文过网。
+	// 证书与私钥必须成对提供，否则视为配置错误直接拒绝启动。
+	if (*tlsCert == "") != (*tlsKey == "") {
+		fmt.Fprintln(os.Stderr, "拒绝启动：-tls-cert 与 -tls-key 必须同时提供。")
+		return 1
+	}
+	var tlsCfg *tls.Config
+	useTLS := *tlsCert != ""
+	if useTLS {
+		cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "加载 TLS 证书失败: %v\n", err)
+			return 1
+		}
+		tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+	} else if !isLoopbackListen(*addr) {
+		fmt.Fprintf(os.Stderr,
+			"警告：监听地址 %q 非回环且未启用 TLS（-tls-cert / -tls-key）。\n"+
+				"鉴权令牌、主机密码与私钥口令都会以明文经过网络；请在前面加反向代理终止 TLS，"+
+				"或直接用内置 TLS 启动。\n", *addr)
 	}
 
 	fmt.Print(banner)
@@ -148,11 +173,18 @@ func run() int {
 		lg.Error("listen failed", "addr", *addr, "error", err.Error())
 		return 1
 	}
+	if useTLS {
+		ln = tls.NewListener(ln, tlsCfg)
+	}
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
 
 	hostCount := len(store.ListHosts())
 	lg.Info("QxSSH started",
 		"version", bootstrap.Version,
-		"addr", "http://"+ln.Addr().String(),
+		"addr", scheme+"://"+ln.Addr().String(),
 		"configDir", store.Dir(),
 		"hosts", hostCount,
 		"logLevel", strings.ToLower(level.String()),
@@ -160,7 +192,7 @@ func run() int {
 	if p := lg.Path(); p != "" {
 		lg.Info("log file", "path", p)
 	}
-	url := "http://" + ln.Addr().String()
+	url := scheme + "://" + ln.Addr().String()
 	fmt.Printf("QxSSH running at %s\n", url)
 	if *open {
 		if err := openBrowser(url); err != nil {

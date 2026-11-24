@@ -983,19 +983,15 @@ func (s *Store) ClearScopes(appID string) error {
 func (s *Store) HasGrant(appID, perm string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.data.AppGrants[appID] != nil && s.data.AppGrants[appID][perm] != "" {
-		return true
-	}
 	if m := s.data.AppScopes[appID]; m != nil {
-		if g, ok := m[perm]; ok && (g.ExpiresAt == 0 || time.Now().Unix() <= g.ExpiresAt) {
-			return true
-		}
-		colon := strings.ReplaceAll(perm, ".", ":")
-		if g, ok := m[colon]; ok && (g.ExpiresAt == 0 || time.Now().Unix() <= g.ExpiresAt) {
-			return true
+		now := time.Now().Unix()
+		for _, key := range []string{perm, strings.ReplaceAll(perm, ".", ":")} {
+			if g, ok := m[key]; ok {
+				return g.ExpiresAt == 0 || now <= g.ExpiresAt
+			}
 		}
 	}
-	return false
+	return s.data.AppGrants[appID] != nil && s.data.AppGrants[appID][perm] != ""
 }
 
 // NormalizeGrants 用 norm 归一化所有已授权权限键（用于别名/旧键升级），并持久化结果。
@@ -1326,8 +1322,7 @@ func (s *Store) SaveRefresh(r RefreshRow) error {
 }
 
 // GetRefresh 取一条刷新令牌记录；不存在时 ok 为 false。
-// 兼容旧版明文存储：哈希未命中时回退明文查询，命中即把该行迁移为哈希键。
-// 返回的 RefreshRow.Token 恢复为调用方出示的原始令牌，保持上层语义不变。
+// 刷新令牌在数据库中始终只保存 refreshKey(token)，不接受明文键回查。
 func (s *Store) GetRefresh(token string) (RefreshRow, bool) {
 	if token == "" {
 		return RefreshRow{}, false
@@ -1346,17 +1341,11 @@ func (s *Store) GetRefresh(token string) (RefreshRow, bool) {
 		r.Token = token
 		return r, true
 	}
-	// 旧版明文行回退（QX-024 迁移）。
-	err = s.db.QueryRow(`SELECT token, app_id, jti, rot_from, exp, revoked, last_use, created_at, COALESCE(extra_scopes, '')
-		FROM app_refresh WHERE token = ?`, token).
-		Scan(&r.Token, &r.AppID, &r.JTI, &r.RotFrom, &r.Exp, &revoked, &r.LastUse, &r.CreatedAt, &r.ExtraScopes)
-	s.mu.RUnlock()
 	if err != nil {
+		s.mu.RUnlock()
 		return RefreshRow{}, false
 	}
-	s.mu.Lock()
-	_, _ = s.db.Exec(`UPDATE app_refresh SET token = ? WHERE token = ?`, refreshKey(token), token)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	r.Revoked = revoked != 0
 	r.Token = token
 	return r, true
@@ -1467,6 +1456,44 @@ func (s *Store) TrimRefresh(keep int, now int64) (int, error) {
 	}
 	n, err := res.RowsAffected()
 	return int(n), err
+}
+
+// SaveJobOwner 在宿主机侧记录一条远端后台任务的归属（QXS-13）。
+// 归属只认本机记录：远端 meta.json 可被 SSH 用户改写，不能用于鉴权。
+func (s *Store) SaveJobOwner(host, jobID, appID string) error {
+	if host == "" || jobID == "" {
+		return errors.New("任务归属缺少主机或任务 id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO job_owners (host, job_id, app_id, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(host, job_id) DO UPDATE SET app_id = excluded.app_id`,
+		host, jobID, appID, time.Now().Unix())
+	return err
+}
+
+// JobOwner 返回宿主机侧记录的任务归属应用；未登记时 ok 为 false。
+func (s *Store) JobOwner(host, jobID string) (string, bool) {
+	if host == "" || jobID == "" {
+		return "", false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var app string
+	err := s.db.QueryRow(`SELECT app_id FROM job_owners WHERE host = ? AND job_id = ?`, host, jobID).Scan(&app)
+	if err != nil {
+		return "", false
+	}
+	return app, true
+}
+
+// DropJobOwner 删除一条任务归属（任务结束或清理时调用）。
+func (s *Store) DropJobOwner(host, jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM job_owners WHERE host = ? AND job_id = ?`, host, jobID)
+	return err
 }
 
 // Prefs 返回全部界面偏好键值。

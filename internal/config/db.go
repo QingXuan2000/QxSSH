@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
+
+	"qxssh/internal/logging"
+	"qxssh/internal/securefs"
 
 	"golang.org/x/crypto/argon2"
 
@@ -108,6 +112,17 @@ var schemaStatements = []string{
 		value TEXT NOT NULL
 	)`,
 
+	// job_owners 在宿主机侧持久化远端后台任务的归属（QXS-13）。
+	// 归属必须由本机裁决：远端 ~/.qxssh/jobs/<id>/meta.json 由 SSH 用户可写，
+	// 用它做鉴权等于把授权决定交给被管主机。
+	`CREATE TABLE IF NOT EXISTS job_owners (
+		host       TEXT NOT NULL,
+		job_id     TEXT NOT NULL,
+		app_id     TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		PRIMARY KEY (host, job_id)
+	)`,
+
 	`CREATE TABLE IF NOT EXISTS schedules (
 		id         TEXT PRIMARY KEY,
 		app_id     TEXT NOT NULL,
@@ -144,7 +159,11 @@ var dropStatements = []string{
 
 // openDB 以 WAL、busy_timeout 等 pragma 打开（必要时创建）SQLite 数据库并建表。
 func openDB(path string) (*sql.DB, error) {
-
+	if err := securefs.Protect(filepath.Dir(path)); err != nil {
+		// 目录可能属于其他主体（共享部署、受管临时目录），无 WRITE_DAC 时
+		// 不能拒绝启动；文件本身的 ACL 仍在下面单独强制。
+		_ = err
+	}
 	dsn := "file:" + filepath.ToSlash(path) +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
@@ -161,6 +180,11 @@ func openDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("打开数据库 %s 失败: %w", path, err)
 	}
+	if err := securefs.Protect(path); err != nil {
+		// 受限环境（沙箱、非属主目录、只读挂载）可能没有 WRITE_DAC：加固尽力而为，
+		// 失败只告警不阻断启动，由运维据此决定是否迁移配置目录。
+		logging.New(logging.LevelInfo).Warn("protect database ACL failed", "path", path, "error", err.Error())
+	}
 	for _, stmt := range schemaStatements {
 		if _, err := db.Exec(stmt); err != nil {
 			db.Close()
@@ -175,13 +199,18 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	// 兼容迁移：如果已有 app_refresh 表未含 extra_scopes 列，补齐该列
 	_, _ = db.Exec("ALTER TABLE app_refresh ADD COLUMN extra_scopes TEXT NOT NULL DEFAULT ''")
-	// 清理历史残留的临时授权数据（旧实现遗留的 consent_session，真·本次允许不再写入数据库）
-	_, _ = db.Exec("DELETE FROM app_scopes WHERE granted_by = 'consent_session' OR expires_at > 0")
-	// 收紧凭据库文件权限（QX-023）：属主可读写，其他用户无权。
-	// WAL/SHM 同样处理；Windows 上模式位作用有限，ACL 加固为后续项。
+	// 清理历史残留的临时授权数据，并仅清理已经过期的限时授权。
+	// 未过期的 expires_at 记录必须保留，否则会把限时授权错误地变成启动即失效。
+	nowUnix := time.Now().Unix()
+	_, _ = db.Exec("DELETE FROM app_scopes WHERE granted_by = 'consent_session' OR (expires_at > 0 AND expires_at <= ?)", nowUnix)
+	// 收紧数据库、WAL/SHM 文件权限；Windows 上另尝试设置仅 SYSTEM 与文件所有者
+	// 可访问的 DACL（无 WRITE_DAC 时只告警）。
 	for _, p := range []string{path, path + "-wal", path + "-shm"} {
 		if _, err := os.Stat(p); err == nil {
 			_ = os.Chmod(p, 0o600)
+			if err := securefs.Protect(p); err != nil {
+				logging.New(logging.LevelInfo).Warn("protect config file ACL failed", "path", p, "error", err.Error())
+			}
 		}
 	}
 	return db, nil
@@ -233,6 +262,13 @@ func resolveMasterKey(db *sql.DB, path string) ([]byte, error) {
 	keyPath := filepath.Join(dir, masterKeyFile)
 	pass := os.Getenv(masterPassEnv)
 
+	if _, statErr := os.Stat(keyPath); statErr == nil {
+		if err := securefs.Protect(keyPath); err != nil {
+			logging.New(logging.LevelInfo).Warn("protect master key ACL failed", "path", keyPath, "error", err.Error())
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, statErr
+	}
 	raw, err := os.ReadFile(keyPath)
 	switch {
 	case err == nil:
@@ -300,7 +336,16 @@ func writeMasterKeyFile(keyPath string, key []byte, pass string) error {
 	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, keyPath)
+	if err := securefs.Protect(tmp); err != nil {
+		logging.New(logging.LevelInfo).Warn("protect master key ACL failed", "path", tmp, "error", err.Error())
+	}
+	if err := os.Rename(tmp, keyPath); err != nil {
+		return err
+	}
+	if err := securefs.Protect(keyPath); err != nil {
+		logging.New(logging.LevelInfo).Warn("protect master key ACL failed", "path", keyPath, "error", err.Error())
+	}
+	return nil
 }
 
 // wrapMasterKey 用 Argon2id 派生的 KEK 包裹主密钥：

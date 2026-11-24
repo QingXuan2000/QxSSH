@@ -76,6 +76,7 @@ func New(store *config.Store, log *logging.Logger) (*Runtime, error) {
 			// 慢速攻击防护用 ReadHeaderTimeout：不设 ReadTimeout（会截断慢速
 			// 大文件上传）、不设 WriteTimeout（会切断 WS/流式响应）（QX-064）。
 			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20,
 		},

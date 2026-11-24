@@ -119,10 +119,15 @@ type scheduler struct {
 	stop chan struct{}
 	once sync.Once
 	wg   sync.WaitGroup
+
+	// inflight 记录「本分钟已经派发过」的调度 id（QXS-44）。tick 不再等待
+	// 上一分钟的任务跑完，因此需要一个去重闸门，避免补跑时重复触发同一分钟。
+	mu       sync.Mutex
+	inflight map[string]int64
 }
 
 func newScheduler(gw *Gateway) *scheduler {
-	s := &scheduler{gw: gw, stop: make(chan struct{})}
+	s := &scheduler{gw: gw, stop: make(chan struct{}), inflight: map[string]int64{}}
 	s.wg.Add(1)
 	go s.loop()
 	return s
@@ -149,6 +154,11 @@ func (s *scheduler) loop() {
 	}
 }
 
+// tick 派发本分钟到期的调度。
+//
+// 旧实现对每个任务起 goroutine 后 wg.Wait()，等于把一分钟的派发串行化：任何一个
+// 慢主机（SSH 建连 + 起任务可达数十秒）都会把 tick 拖过整分钟，后续分钟被静默
+// 漏触发（QXS-44）。现在只派发不等待，用 inflight 闸门保证同一分钟不重复派发。
 func (s *scheduler) tick(at time.Time) {
 	list, err := s.gw.store.Schedules("")
 	if err != nil {
@@ -156,7 +166,6 @@ func (s *scheduler) tick(at time.Time) {
 	}
 	minute := at.Truncate(time.Minute)
 	stamp := minute.Unix()
-	var wg sync.WaitGroup
 	for _, sc := range list {
 		if !sc.Enabled || sc.LastRun >= stamp {
 			continue
@@ -165,13 +174,36 @@ func (s *scheduler) tick(at time.Time) {
 		if err != nil || !spec.matches(minute) {
 			continue
 		}
-		wg.Add(1)
+		if !s.claim(sc.ID, stamp) {
+			continue
+		}
 		go func(sc config.Schedule) {
-			defer wg.Done()
 			s.gw.fireSchedule(sc, stamp)
 		}(sc)
 	}
-	wg.Wait()
+}
+
+// claim 标记「本分钟该调度已派发」，重复调用返回 false。
+//
+// 条目只按分钟老化清理，不随任务结束删除：否则一个慢任务结束时正好跨回同一
+// 分钟边界，就会把同一分钟再放行一次。上限是调度条数，开销可忽略。
+func (s *scheduler) claim(id string, stamp int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inflight == nil {
+		s.inflight = map[string]int64{}
+	}
+	if prev, ok := s.inflight[id]; ok && prev >= stamp {
+		return false
+	}
+	// 顺带清理过期条目，避免 map 随历史分钟无限增长。
+	for k, v := range s.inflight {
+		if stamp-v > 120 {
+			delete(s.inflight, k)
+		}
+	}
+	s.inflight[id] = stamp
+	return true
 }
 
 func (a *Gateway) fireSchedule(sc config.Schedule, stamp int64) {

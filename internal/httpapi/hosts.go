@@ -128,6 +128,15 @@ func (a *Gateway) handleTestHost(w http.ResponseWriter, r *http.Request) {
 			h.KeyPassphrase = req.KeyPassphrase
 		}
 	} else {
+		// 未保存主机意味着请求体可任意指定服务端出向目的地。该能力只开放给
+		// 宿主/内置设置界面，避免持有普通 hosts:test 权限的应用把服务端当 SSRF 探针。
+		if !a.requirePermAdmin(w, r) {
+			return
+		}
+		if strings.TrimSpace(req.KeyPath) != "" {
+			writeErr(w, http.StatusBadRequest, errors.New("测试新主机只允许直接提供 keyData，不允许服务端读取 keyPath"))
+			return
+		}
 		h = config.Host{
 			Address:       req.Address,
 			Port:          req.Port,
@@ -149,7 +158,8 @@ func (a *Gateway) handleTestHost(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	client, err := a.mgr.DialOnce(h)
 	if err != nil {
-		writeJSON(w, okErrResp{OK: false, Error: err.Error()})
+		a.log.Warn("host test failed", "host", h.ID, "error", err.Error())
+		writeJSON(w, okErrResp{OK: false, Error: "连接测试失败"})
 		return
 	}
 	_ = client.Close()

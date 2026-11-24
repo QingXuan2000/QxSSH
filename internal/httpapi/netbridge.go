@@ -81,7 +81,9 @@ func (a *Gateway) serveTcpWS(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ssh: "+gerr.Error(), http.StatusBadGateway)
 			return
 		}
-		conn, err = client.Dial("tcp", target)
+		ctx, cancel := context.WithTimeout(r.Context(), tcpDialTimeout)
+		conn, err = client.DialContext(ctx, "tcp", target)
+		cancel()
 	}
 	if err != nil {
 		http.Error(w, "dial: "+err.Error(), http.StatusBadGateway)
@@ -102,6 +104,9 @@ func (a *Gateway) serveTcpWS(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	var once sync.Once
 	finish := func() { once.Do(func() { close(done) }) }
+	// QXS-06：WS 侧也必须有 pong 读限期和周期 ping；此前只有 TCP 侧
+	// 设置 deadline，静默的半开 WS 会永久占用全局 wsSlots。
+	wsKeepalive(up, done, finish)
 
 	go wsPump(wr, deadlineReader{c: conn, d: tcpIdleTimeout}, finish, finish)
 

@@ -283,10 +283,26 @@ func (a *Gateway) remoteCommand(s execSpec) (cmd string, stdin string) {
 }
 
 func execLocalCmd(ctx context.Context, argv []string, elevated bool) *exec.Cmd {
+	var cmd *exec.Cmd
 	if elevated {
-		return exec.CommandContext(ctx, "sudo", append([]string{"-n"}, argv...)...)
+		cmd = exec.CommandContext(ctx, "sudo", append([]string{"-n"}, argv...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, argv[0], argv[1:]...)
 	}
-	return exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = filteredExecEnv()
+	return cmd
+}
+
+func filteredExecEnv() []string {
+	all := os.Environ()
+	env := make([]string, 0, len(all))
+	for _, item := range all {
+		if strings.HasPrefix(item, "QXSSH_AUTH_TOKEN=") || strings.HasPrefix(item, "QXSSH_SESSION=") {
+			continue
+		}
+		env = append(env, item)
+	}
+	return env
 }
 
 func (a *Gateway) execRun(s execSpec) (string, error) {
@@ -400,7 +416,10 @@ func execTrim(s string, max int) (string, bool) {
 	if len(s) <= max {
 		return s, false
 	}
-	for max > 0 && !utf8.ValidString(s[:max]) {
+	// 有界回退（QXS-04）：只在截断点附近向前退让至多 utf8.UTFMax-1 个字节，
+	// 把一个被切断的多字节序列补齐。原实现对每个候选长度都做全量 utf8.ValidString
+	// 扫描，畸形输出可把一次请求放大成 O(n²) 的 CPU 消耗。
+	for i := 0; i < utf8.UTFMax-1 && max > 0 && !utf8.RuneStart(s[max]); i++ {
 		max--
 	}
 	return s[:max] + "\n…（输出已截断）", true
@@ -611,19 +630,17 @@ func (a *Gateway) startBackground(argv []string, cwd string, elevated bool, app 
 	}
 	a.bgSeq++
 	id := fmt.Sprintf("bg%d", a.bgSeq)
-	a.bgMu.Unlock()
 
 	cmd := execLocalCmd(context.Background(), argv, elevated)
 	cmd.Dir = cwd
 	p := &bgProc{ID: id, Argv: argv, Started: time.Now(), App: app, done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = p, p
 	if err := cmd.Start(); err != nil {
+		a.bgMu.Unlock()
 		return bgStartResp{}, err
 	}
 	p.PID = cmd.Process.Pid
 	p.proc = cmd.Process
-
-	a.bgMu.Lock()
 	a.bgProcs[id] = p
 	a.pruneBackgroundLocked()
 	a.bgMu.Unlock()

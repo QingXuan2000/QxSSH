@@ -35,7 +35,8 @@ type Options struct {
 	Proto string `json:"proto"`
 	// UDP 打开动态转发的 SOCKS5 UDP ASSOCIATE（CMD=3）：浏览器把 UDP 数据报直接交给
 	// 代理，由这条动态转发经 SSH 中继出去。只有 Type=dynamic 时有效。
-	UDP bool `json:"udp"`
+	UDP   bool   `json:"udp"`
+	Owner string `json:"-"`
 }
 
 // Running 描述一条正在运行的端口转发。cancel 用于内部停止该转发的监听循环。
@@ -55,6 +56,7 @@ type Running struct {
 	Agent     string    `json:"agent,omitempty"`
 	AgentPort int       `json:"agentPort,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
+	Owner     string    `json:"-"`
 
 	cancel func()
 }
@@ -78,11 +80,14 @@ func New(mgr *sshpool.Pool, store *config.Store) *Registry {
 }
 
 // List 返回所有运行中的转发副本。
-func (m *Registry) List() []Running {
+func (m *Registry) List(owner string, all bool) []Running {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Running, 0, len(m.items))
 	for _, it := range m.items {
+		if !all && it.Owner != owner {
+			continue
+		}
 		cp := *it
 		cp.cancel = nil
 		out = append(out, cp)
@@ -91,11 +96,11 @@ func (m *Registry) List() []Running {
 }
 
 // Get 按 id 查询转发，第二个返回值表示是否存在。
-func (m *Registry) Get(id string) (Running, bool) {
+func (m *Registry) Get(id, owner string, all bool) (Running, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	it, ok := m.items[id]
-	if !ok {
+	if !ok || (!all && it.Owner != owner) {
 		return Running{}, false
 	}
 	cp := *it
@@ -104,9 +109,12 @@ func (m *Registry) Get(id string) (Running, bool) {
 }
 
 // Stop 停止指定 id 的转发。
-func (m *Registry) Stop(id string) error {
+func (m *Registry) Stop(id, owner string, all bool) error {
 	m.mu.Lock()
 	it, ok := m.items[id]
+	if ok && !all && it.Owner != owner {
+		ok = false
+	}
 	if ok {
 		delete(m.items, id)
 	}
@@ -262,6 +270,7 @@ func (m *Registry) Start(req Options) (*Running, error) {
 		Listen:    listen,
 		Target:    req.Target,
 		StartedAt: time.Now(),
+		Owner:     req.Owner,
 		cancel:    closeFn,
 	}
 

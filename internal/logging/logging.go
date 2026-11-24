@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +78,10 @@ func redact(key string, val any) string {
 	return fmt.Sprint(val)
 }
 
-const maxFileSize = 8 << 20
+const (
+	maxFileSize     = 8 << 20
+	maxRotatedFiles = 8
+)
 
 // Logger 是一个并发安全的日志器。默认输出到 stdout，可通过 SetFile 追加文件输出。
 type Logger struct {
@@ -186,8 +190,10 @@ func (l *Logger) writeFile(line string) {
 	}
 	if l.size > maxFileSize {
 		_ = l.file.Close()
-		rotated := l.path + "." + time.Now().Format("150405")
-		_ = os.Rename(l.path, rotated)
+		rotated := fmt.Sprintf("%s.%d", l.path, time.Now().UnixNano())
+		if err := os.Rename(l.path, rotated); err == nil {
+			l.pruneRotated()
+		}
 		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			l.file, l.size = nil, 0
@@ -199,7 +205,21 @@ func (l *Logger) writeFile(line string) {
 	l.size += int64(n)
 }
 
+func (l *Logger) pruneRotated() {
+	matches, err := filepath.Glob(l.path + ".*")
+	if err != nil || len(matches) <= maxRotatedFiles {
+		return
+	}
+	sort.Strings(matches)
+	for _, p := range matches[:len(matches)-maxRotatedFiles] {
+		_ = os.Remove(p)
+	}
+}
+
 func quote(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return strconv.Quote(s)
+	}
 	if s == "" {
 		return `""`
 	}

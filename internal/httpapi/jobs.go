@@ -152,18 +152,26 @@ func (a *Gateway) jobClient(w http.ResponseWriter, r *http.Request, host string)
 	return sshRunner{client: client}, true
 }
 
-// rememberJobOwner 记录任务归属（启动时与状态查询时写入缓存）。
+// rememberJobOwner 记录任务归属：内存缓存 + 宿主机侧持久化（QXS-13）。
 func (a *Gateway) rememberJobOwner(host, id, app string) {
 	a.jobOwnMu.Lock()
-	defer a.jobOwnMu.Unlock()
 	if len(a.jobOwn) > 4096 {
 		a.jobOwn = map[string]string{}
 	}
 	a.jobOwn[host+"\x00"+id] = app
+	a.jobOwnMu.Unlock()
+	if a.store != nil {
+		if err := a.store.SaveJobOwner(host, id, app); err != nil {
+			a.log.Warn("persist job owner failed", "host", host, "id", id, "error", err.Error())
+		}
+	}
 }
 
-// jobOwnerApp 取任务归属应用：先查本地缓存，未命中读远端 meta.json 一次。
-func (a *Gateway) jobOwnerApp(run cmdRunner, host, id string) (string, error) {
+// jobOwnerApp 取任务归属应用，来源只有宿主机侧记录（内存缓存 → 数据库）。
+//
+// 绝不读远端 meta.json：那个文件由远端 SSH 用户可写，用它裁决归属等于让
+// 被管主机决定“谁有权 kill 我 / 读我的输出”（QXS-13）。
+func (a *Gateway) jobOwnerApp(_ cmdRunner, host, id string) (string, error) {
 	key := host + "\x00" + id
 	a.jobOwnMu.Lock()
 	app, ok := a.jobOwn[key]
@@ -171,14 +179,18 @@ func (a *Gateway) jobOwnerApp(run cmdRunner, host, id string) (string, error) {
 	if ok {
 		return app, nil
 	}
-	out, err := run.run(jobShellPrelude(id) + `cat "$d/meta.json" 2>/dev/null`)
-	if err != nil {
-		return "", err
+	if a.store != nil {
+		if app, ok := a.store.JobOwner(host, id); ok {
+			a.jobOwnMu.Lock()
+			if len(a.jobOwn) > 4096 {
+				a.jobOwn = map[string]string{}
+			}
+			a.jobOwn[key] = app
+			a.jobOwnMu.Unlock()
+			return app, nil
+		}
 	}
-	var meta jobMeta
-	_ = json.Unmarshal([]byte(strings.TrimSpace(out)), &meta)
-	a.rememberJobOwner(host, id, meta.App)
-	return meta.App, nil
+	return "", nil
 }
 
 // requireJobOwner 校验调用者是任务归属应用或宿主（QX-030）：
@@ -306,7 +318,10 @@ func (a *Gateway) handleJobOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 只读取作业目录内的**常规文件**（QXS-13）：out.log 若被换成符号链接，
+	// 会经 tail 读出该 SSH 用户可读的任意文件。`-L` 拒绝链接，`-f` 拒绝设备/FIFO。
 	cmd := jobShellPrelude(id) + `[ -d "$d" ] || { echo MISSING; exit 0; }; ` +
+		`[ -f "$d/out.log" ] && [ ! -L "$d/out.log" ] || { echo MISSING; exit 0; }; ` +
 		`sz=$(wc -c < "$d/out.log" 2>/dev/null | tr -d ' '); ex=$(cat "$d/exit" 2>/dev/null); ` +
 		`echo "SIZE ${sz:-0} ${ex:--}"; tail -c +` + strconv.FormatInt(offset+1, 10) + ` "$d/out.log" 2>/dev/null | head -c ` + strconv.Itoa(limit)
 	out, err := run.run(cmd)

@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,6 +111,39 @@ func archiveDir(configDir string) string {
 type auditEnvelope struct {
 	V    int    `json:"v"`
 	Data string `json:"d"`
+	// 哈希链表头：Prev 是上一条已落盘行的哈希（首条为空），Hash 是本行载荷的
+	// SHA-256(prev || payload)。二者只出现在 v=2 链路信封里，旧行没有也能读。
+	Prev string `json:"p,omitempty"`
+	Hash string `json:"h,omitempty"`
+}
+
+// auditChainV 是带完整性链的信封版本。载荷仍是原来的明文条目或 v=1 加密信封，
+// 只是外面再套一层链接，便于逐行校验而不改变既有内容格式。
+const auditChainV = 2
+
+// chainHash 计算 SHA-256(prev || payload) 的十六进制摘要。
+func chainHash(prev string, payload []byte) string {
+	h := sha256.New()
+	h.Write([]byte(prev))
+	h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// marshalChained 把一条审计条目编码成带哈希链的信封行。
+func (s *auditStore) marshalChained(e auditEntry, prev string) ([]byte, string, error) {
+	payload, err := s.marshalLine(e)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := chainHash(prev, payload)
+	line, err := json.Marshal(auditEnvelope{
+		V: auditChainV, Prev: prev, Hash: sum,
+		Data: base64.StdEncoding.EncodeToString(payload),
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return line, sum, nil
 }
 
 func (s *auditStore) marshalLine(e auditEntry) ([]byte, error) {
@@ -130,30 +165,54 @@ func (s *auditStore) marshalLine(e auditEntry) ([]byte, error) {
 }
 
 func (s *auditStore) unmarshalLine(b []byte) (auditEntry, error) {
+	e, _, _, err := s.unmarshalVerified(b)
+	return e, err
+}
+
+// errAuditChainBroken 表示某条审计记录的哈希链校验不通过（被改写/插入）。
+var errAuditChainBroken = errors.New("审计记录哈希链已断裂")
+
+// unmarshalVerified 解出一条审计记录，并返回它的链哈希与声明的 prev
+// （非链行两者均为空串）。链行会同时校验自身摘要；校验不过时返回错误。
+func (s *auditStore) unmarshalVerified(b []byte) (auditEntry, string, string, error) {
 	var env auditEnvelope
+	if err := json.Unmarshal(b, &env); err == nil && env.V == auditChainV && env.Data != "" {
+		payload, err := base64.StdEncoding.DecodeString(env.Data)
+		if err != nil {
+			return auditEntry{}, "", "", err
+		}
+		if want := chainHash(env.Prev, payload); want != env.Hash {
+			return auditEntry{}, "", "", errAuditChainBroken
+		}
+		e, err := s.unmarshalLine(payload)
+		if err != nil {
+			return auditEntry{}, "", "", err
+		}
+		return e, env.Hash, env.Prev, nil
+	}
 	if err := json.Unmarshal(b, &env); err == nil && env.V == auditEnvelopeV && env.Data != "" {
 		if s.se == nil {
-			return auditEntry{}, errors.New("审计条目已加密但主密钥不可用")
+			return auditEntry{}, "", "", errors.New("审计条目已加密但主密钥不可用")
 		}
 		raw, err := base64.StdEncoding.DecodeString(env.Data)
 		if err != nil {
-			return auditEntry{}, err
+			return auditEntry{}, "", "", err
 		}
 		plain, err := s.se.Open(raw, nil)
 		if err != nil {
-			return auditEntry{}, err
+			return auditEntry{}, "", "", err
 		}
 		var e auditEntry
 		if err := json.Unmarshal(plain, &e); err != nil {
-			return auditEntry{}, err
+			return auditEntry{}, "", "", err
 		}
-		return e, nil
+		return e, "", "", nil
 	}
 	var e auditEntry
 	if err := json.Unmarshal(b, &e); err != nil {
-		return auditEntry{}, err
+		return auditEntry{}, "", "", err
 	}
-	return e, nil
+	return e, "", "", nil
 }
 
 func countJSONL(path string) int64 {
@@ -303,6 +362,15 @@ func requireAuditGroup(hostID string) (string, error) {
 	return auditGroupDir(hostID), nil
 }
 
+func (a *Gateway) requireAuditAdmin(w http.ResponseWriter, r *http.Request) bool {
+	app := callerApp(r)
+	if app != hostApp && !systemAppIDs[app] {
+		writeErr(w, http.StatusForbidden, errors.New("只有宿主或系统应用可以管理审计配置和归档"))
+		return false
+	}
+	return true
+}
+
 func (a *Gateway) auditGroup(g string) *auditGroupStat {
 	st, ok := a.audit.statOf(g)
 	if !ok {
@@ -319,6 +387,9 @@ func (a *Gateway) auditGroup(g string) *auditGroupStat {
 }
 
 func (a *Gateway) handleAuditList(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuditAdmin(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	group, err := requireAuditGroup(q.Get("host"))
 	if err != nil {
@@ -347,6 +418,9 @@ func (a *Gateway) handleAuditList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handleAuditVerbose(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuditAdmin(w, r) {
+		return
+	}
 	var req struct {
 		Verbose bool   `json:"verbose"`
 		Host    string `json:"host,omitempty"`
@@ -373,6 +447,9 @@ func (a *Gateway) handleAuditVerbose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handleAuditSettings(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuditAdmin(w, r) {
+		return
+	}
 	cur := a.audit.settings()
 	if r.Method == http.MethodGet {
 		group, err := requireAuditGroup(r.URL.Query().Get("host"))
@@ -440,6 +517,9 @@ func (a *Gateway) handleAuditSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handleAuditArchive(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuditAdmin(w, r) {
+		return
+	}
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -469,6 +549,9 @@ func (a *Gateway) handleAuditArchive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Gateway) handleAuditClear(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuditAdmin(w, r) {
+		return
+	}
 	var req struct {
 		Host string `json:"host"`
 	}
@@ -518,12 +601,17 @@ func (a *Gateway) handleAuditNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app := callerApp(r)
+	if app != hostApp && !systemAppIDs[app] {
+		writeErr(w, http.StatusForbidden, errors.New("审计备注仅限宿主或系统应用"))
+		return
+	}
+	hostID := peekHostID(r)
 	if app == hostApp {
 		app = ""
 	}
 	a.audit.record(auditEntry{
 		AppID:  app,
-		HostID: peekHostID(r),
+		HostID: hostID,
 		Type:   auditNote,
 		Target: truncStr(action, auditNoteActionMax),
 		Detail: truncStr(req.Detail, auditNoteDetailMax),

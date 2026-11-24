@@ -32,10 +32,11 @@ type auditStore struct {
 	path   string
 	db     *config.Store
 
-	mu    sync.Mutex
-	buf   *ring.Ring
-	seq   uint64
-	sizes map[string]int64
+	mu      sync.Mutex
+	buf     *ring.Ring
+	seq     uint64
+	sizes   map[string]int64
+	queueMu sync.RWMutex // 保护 queue/sysQueue 的发送与关闭
 
 	verbose atomic.Bool
 
@@ -187,15 +188,19 @@ func (s *auditStore) push(e auditEntry, q chan auditEntry) {
 		return
 	}
 
+	s.queueMu.RLock()
 	if s.closing.Load() {
+		s.queueMu.RUnlock()
 		return
 	}
 	select {
 	case q <- e:
+		s.queueMu.RUnlock()
 		return
 	default:
 	}
 	if q == s.sysQueue {
+		s.queueMu.RUnlock()
 		return
 	}
 	select {
@@ -206,6 +211,11 @@ func (s *auditStore) push(e auditEntry, q chan auditEntry) {
 	n := s.dropped
 	s.dropped++
 	s.wmu.Unlock()
+	select {
+	case q <- e:
+	default:
+	}
+	s.queueMu.RUnlock()
 	if n == 0 || n%1000 == 0 {
 		s.log.Warn("audit queue overflow, entries dropped", "dropped", n+1)
 		s.recordSystem(auditEntry{
@@ -213,10 +223,6 @@ func (s *auditStore) push(e auditEntry, q chan auditEntry) {
 			Result: fmt.Sprint(n + 1),
 			Detail: fmt.Sprintf("落盘队列已满，累计丢弃 %d 条审计记录（请求路径不阻塞磁盘 IO）", n+1),
 		})
-	}
-	select {
-	case q <- e:
-	default:
 	}
 }
 
@@ -229,6 +235,7 @@ func (s *auditStore) writeLoop() {
 	// 都碰不到它——反取证操作自身留痕。单代轮转保留最近两代。
 	var sf *os.File
 	sysPath := filepath.Join(s.curDir, "system.jsonl")
+	var sysPrev string
 	writeSys := func(e auditEntry) {
 		if s.curDir == "" {
 			return
@@ -240,8 +247,9 @@ func (s *auditStore) writeLoop() {
 				s.log.Warn("system audit open failed", "error", err.Error())
 				return
 			}
+			sysPrev = s.lastChainHash(sysPath)
 		}
-		line, err := s.marshalLine(e)
+		line, sum, err := s.marshalChained(e, sysPrev)
 		if err != nil {
 			return
 		}
@@ -252,12 +260,15 @@ func (s *auditStore) writeLoop() {
 			sf = nil
 			return
 		}
+		sysPrev = sum
 		if fi, err := sf.Stat(); err == nil && fi.Size() >= s.settings().MaxBytes {
 			sf.Close()
 			_ = os.Rename(sysPath, filepath.Join(s.curDir, "system.old.jsonl"))
 			sf = nil
+			sysPrev = ""
 		}
 	}
+	var curPrev string
 	write := func(e auditEntry) {
 		g := auditGroupDir(e.HostID)
 		if f == nil || g != cur {
@@ -266,14 +277,20 @@ func (s *auditStore) writeLoop() {
 			}
 			cur = g
 			f = s.openGroup(g)
+			if f == nil {
+				curPrev = ""
+			} else {
+				curPrev = s.lastChainHash(s.groupPath(g))
+			}
 		}
 		if f == nil {
 			return
 		}
-		line, err := s.marshalLine(e)
+		line, sum, err := s.marshalChained(e, curPrev)
 		if err != nil {
 			return
 		}
+		curPrev = sum
 		line = append(line, '\n')
 		n, err := f.Write(line)
 		s.wmu.Lock()
@@ -634,18 +651,76 @@ func (s *auditStore) auditTail(path string, maxBytes int64) []auditEntry {
 func (s *auditStore) parseJSONL(b []byte) []auditEntry {
 	out := make([]auditEntry, 0, 256)
 	start := 0
+	prev := ""
+	prevKnown := false
 	for i := 0; i <= len(b); i++ {
 		if i < len(b) && b[i] != '\n' {
 			continue
 		}
 		if line := bytes.TrimSpace(b[start:i]); len(line) > 0 {
-			if e, err := s.unmarshalLine(line); err == nil {
+			e, sum, declared, err := s.unmarshalVerified(line)
+			switch {
+			case err != nil:
+				// 被改写或插入的行按“校验失败”暴露，而不是静默丢弃。
+				out = append(out, auditEntry{Type: auditSystem, Target: "integrity",
+					Detail: "审计记录未能通过完整性校验（可能被删改或插入）", Result: "broken"})
+			case sum != "":
+				if prevKnown && declared != prev {
+					out = append(out, auditEntry{Type: auditSystem, Target: "integrity",
+						Detail: "审计记录哈希链断裂（中间记录被删除或重排）", Result: "gap"})
+				}
+				prev, prevKnown = sum, true
+				out = append(out, e)
+			default:
+				// 旧版无链行：无法参与校验，但保留可读性。
+				prev, prevKnown = "", false
 				out = append(out, e)
 			}
 		}
 		start = i + 1
 	}
 	return out
+}
+
+// lastChainHash 返回某个审计文件最后一条链式记录的行哈希；无链式记录时返回空串。
+// 只读取尾部有限字节，避免为续链而整文件扫描。
+func (s *auditStore) lastChainHash(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return ""
+	}
+	const tail = 256 << 10
+	off := fi.Size() - tail
+	if off < 0 {
+		off = 0
+	}
+	buf := make([]byte, fi.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil {
+		return ""
+	}
+	for i := len(buf) - 1; i >= 0; i-- {
+		if buf[i] != '\n' {
+			continue
+		}
+		line := bytes.TrimSpace(buf[i+1:])
+		if len(line) == 0 {
+			continue
+		}
+		var env auditEnvelope
+		if json.Unmarshal(line, &env) == nil && env.V == auditChainV {
+			return env.Hash
+		}
+		return ""
+	}
+	return ""
 }
 
 func (s *auditStore) list(group, appID string, onlyHost bool, typ auditType, limit int) []auditEntry {
@@ -912,9 +987,13 @@ func (s *auditStore) close() {
 		}
 
 		s.closing.Store(true)
+		s.queueMu.Lock()
+		// 写入方在读锁保护下完成非阻塞发送；持有独占锁后不会再有并发发送，
+		// 可以安全关闭队列。writeLoop 会排空缓冲区后退出。
 		close(s.queue)
 		close(s.sysQueue)
 		close(s.cmdCh)
+		s.queueMu.Unlock()
 		<-s.done
 	})
 }

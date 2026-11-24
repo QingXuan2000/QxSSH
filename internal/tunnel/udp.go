@@ -39,6 +39,8 @@ const (
 	udpPeerIdleTTL = 90 * time.Second
 	// udpJanitorEvery 是空闲会话的扫描周期。
 	udpJanitorEvery = 20 * time.Second
+	// udpPeerMax 是单条转发允许的客户端 peer 数量上限。
+	udpPeerMax = 256
 	// udpAgentBootTTL 是从启动远端中继到它报告监听端口的等待上限。
 	udpAgentBootTTL = 25 * time.Second
 )
@@ -359,6 +361,7 @@ func (m *Registry) startUDP(req Options) (*Running, error) {
 		Agent:     agent.path,
 		AgentPort: agent.port,
 		StartedAt: time.Now(),
+		Owner:     req.Owner,
 		cancel:    rt.shutdown,
 	}
 	m.items[id] = it
@@ -397,8 +400,14 @@ func (rt *udpRuntime) peer(from *net.UDPAddr) *udpPeer {
 	p := rt.peers[key]
 	rt.mu.Unlock()
 	if p != nil {
+		p.touch()
 		return p
 	}
+	if len(rt.peers) >= udpPeerMax {
+		rt.mu.Unlock()
+		return nil
+	}
+	rt.mu.Unlock()
 
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(rt.agent.port))
 	conn, err := rt.agent.client.Dial("tcp", addr)
@@ -412,6 +421,11 @@ func (rt *udpRuntime) peer(from *net.UDPAddr) *udpPeer {
 		rt.mu.Unlock()
 		fresh.close()
 		return existing
+	}
+	if len(rt.peers) >= udpPeerMax {
+		rt.mu.Unlock()
+		fresh.close()
+		return nil
 	}
 	rt.peers[key] = fresh
 	rt.mu.Unlock()

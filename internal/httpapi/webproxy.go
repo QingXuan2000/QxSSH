@@ -24,7 +24,8 @@ func (a *Gateway) handleStartWebProxy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	inst, err := a.proxies.Start(req.HostID, client, req.Target, req.TLS)
+	owner := callerApp(r)
+	inst, err := a.proxies.Start(req.HostID, client, req.Target, req.TLS, owner)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
@@ -37,6 +38,11 @@ func (a *Gateway) handleWebProxyState(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("id is required"))
+		return
+	}
+	owner := callerApp(r)
+	if !a.proxies.Owns(id, owner, owner == hostApp) {
+		writeErr(w, http.StatusNotFound, errors.New("webproxy not found"))
 		return
 	}
 	st, err := a.proxies.State(id)
@@ -53,6 +59,11 @@ func (a *Gateway) handleStopWebProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	owner := callerApp(r)
+	if !a.proxies.Owns(req.ID, owner, owner == hostApp) {
+		writeErr(w, http.StatusNotFound, errors.New("webproxy not found"))
 		return
 	}
 	if err := a.proxies.Stop(req.ID); err != nil {

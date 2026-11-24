@@ -333,7 +333,7 @@ func (a *Gateway) routes() http.Handler {
 		static.ServeHTTP(w, r)
 	}))
 
-	return withSecurityHeaders(a.withCORS(a.withHostGuard(a.withAuth(a.withLogging(a.withRecovery(mux))))))
+	return withSecurityHeaders(a.withCORS(a.withHostGuard(a.withAuth(a.withSessionCookie(a.withLogging(a.withRecovery(mux)))))))
 }
 
 // isTrustedLoopbackHost 判断 Host 头是否指向回环（127.0.0.0/8、::1、localhost）。
@@ -416,12 +416,45 @@ func (a *Gateway) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+// sessionCookieName 承载宿主会话 JWT 的 HttpOnly Cookie。
+//
+// 目的（QXS-30）：浏览器里直接点开下载/预览链接（<a href>、iframe src）无法附加
+// 自定义请求头，旧实现只能把会话令牌拼进查询串，导致令牌进入浏览历史、Referer
+// 与下游访问日志。改用同源 Cookie 后，这些请求由浏览器自动带凭据，URL 里不再有
+// 任何秘密；Cookie 为 HttpOnly（脚本读不到）且 SameSite=Strict（跨站不发送）。
+const sessionCookieName = "qx_session"
+
 // sessionHeaderToken 取请求里携带的宿主会话令牌（应用 API 调用统一用它）。
+// 优先级：显式请求头 → 同源会话 Cookie → 查询参数（仅保留 WebSocket 等
+// 无法自定义请求头的通道使用）。
 func sessionHeaderToken(r *http.Request) string {
 	if t := r.Header.Get("X-Qx-Session"); t != "" {
 		return t
 	}
+	if c, err := r.Cookie(sessionCookieName); err == nil && c != nil && c.Value != "" {
+		return c.Value
+	}
 	return r.URL.Query().Get("session")
+}
+
+// withSessionCookie 把经请求头送来的有效会话令牌落到同源 HttpOnly Cookie，
+// 使后续无法携带请求头的同源导航请求（下载、预览）也能通过鉴权。
+func (a *Gateway) withSessionCookie(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 只有宿主控制台的身份才写入该 Cookie：应用令牌也走请求头，
+		// 若允许应用覆盖同名 Cookie，会顶掉宿主会话并让控制台下载降权失败。
+		if tok := r.Header.Get("X-Qx-Session"); tok != "" && a.sessionApp(tok) == hostApp {
+			http.SetCookie(w, &http.Cookie{
+				Name:     sessionCookieName,
+				Value:    tok,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteStrictMode,
+			})
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *Gateway) withAuth(next http.Handler) http.Handler {
@@ -497,6 +530,17 @@ func (a *Gateway) authFailAllowed(ip string) bool {
 	return true
 }
 
+func safeLogRequestPath(p string) string {
+	parts := strings.Split(p, "/")
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "apps" && parts[i+1] == "file" && i+3 < len(parts) {
+			parts[i+3] = "[REDACTED]"
+			break
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
 const slowRequestMs = 1500
 
 func (a *Gateway) withLogging(next http.Handler) http.Handler {
@@ -511,7 +555,7 @@ func (a *Gateway) withLogging(next http.Handler) http.Handler {
 		dur := time.Since(start)
 		kv := []any{
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", safeLogRequestPath(r.URL.Path),
 			"status", rec.status,
 			"dur", dur.Round(time.Millisecond).String(),
 		}
@@ -553,6 +597,8 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "SAMEORIGIN")
 		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Cache-Control", "no-store")
+		h.Set("Content-Security-Policy", "default-src 'self'; object-src 'none'; frame-ancestors 'self'")
 		next.ServeHTTP(w, r)
 	})
 }

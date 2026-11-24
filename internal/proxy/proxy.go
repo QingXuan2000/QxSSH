@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	maxFollows = 5
-
+	maxFollows         = 5
+	maxInstances       = 64
 	proxyRedirectParam = "__qx_proxy_redirect"
 )
 
@@ -129,6 +129,7 @@ func isDocumentRequest(r *http.Request) bool {
 type Instance struct {
 	ID     string `json:"id"`
 	HostID string `json:"hostId"`
+	Owner  string `json:"-"`
 	Target string `json:"target"`
 	URL    string `json:"url"`
 
@@ -279,9 +280,15 @@ func (m *Registry) List() []Instance {
 // Start 在 hostID 对应的 SSH 通道上，为远端 target（host:port）建立一个
 // 反向代理实例并返回它。useTLS 决定以 https 还是 http 访问上游。
 // 目标禁止链路本地/云元数据字面量地址（QX-035）；上游 TLS 正常校验证书。
-func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, useTLS bool) (*Instance, error) {
+func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, useTLS bool, owner string) (*Instance, error) {
 	if sshClient == nil {
 		return nil, fmt.Errorf("webproxy: ssh client is nil")
+	}
+	m.mu.Lock()
+	full := len(m.items) >= maxInstances
+	m.mu.Unlock()
+	if full {
+		return nil, fmt.Errorf("webproxy: 代理实例数已达上限（%d）", maxInstances)
 	}
 	th, _, err := net.SplitHostPort(target)
 	if err != nil {
@@ -312,10 +319,18 @@ func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, us
 	}
 
 	m.mu.Lock()
+	if len(m.items) >= maxInstances {
+		m.mu.Unlock()
+		_ = srv.Close()
+		tr.CloseIdleConnections()
+		_ = ln.Close()
+		return nil, fmt.Errorf("webproxy: 代理实例数已达上限（%d）", maxInstances)
+	}
 	m.seq++
 	inst := &Instance{
 		ID:     fmt.Sprintf("wp%d", m.seq),
 		HostID: hostID,
+		Owner:  owner,
 		Target: target,
 		URL:    "http://" + ln.Addr().String(),
 		ln:     ln,
@@ -331,7 +346,12 @@ func (m *Registry) Start(hostID string, sshClient *ssh.Client, target string, us
 	return inst, nil
 }
 
-// State 返回指定代理实例最近一次文档请求的轨迹快照。
+func (m *Registry) Owns(id, owner string, all bool) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	it, ok := m.items[id]
+	return ok && (all || it.Owner == owner)
+}
 func (m *Registry) State(id string) (State, error) {
 	m.mu.Lock()
 	it, ok := m.items[id]
@@ -388,7 +408,7 @@ func (m *Registry) StopByHost(hostID string) int {
 // isMetadataAddr 判断字面量 IP 是否为链路本地/云元数据地址（169.254.0.0/16、
 // fe80::/10）。目标经 SSH 在远端解析拨号，本地只能拦字面量 IP，DNS 名尽力而为。
 func isMetadataAddr(host string) bool {
-	ip := net.ParseIP(host)
+	ip := net.ParseIP(strings.Trim(host, "[]"))
 	if ip == nil {
 		return false
 	}
@@ -398,8 +418,25 @@ func isMetadataAddr(host string) bool {
 	return ip.IsLinkLocalUnicast()
 }
 
-// withLocalHostGuard 只接受回环 Host：代理监听在本机，DNS rebinding 场景下
-// Host 会是攻击者域名，直接拒绝（QX-016）。
+// isBlockedRedirectHost 同时检查字面量 IP 与 DNS 解析结果。重定向发生在
+// 运行期，不能只依赖 Start 的一次性校验，否则上游可把代理永久切到元数据地址。
+func isBlockedRedirectHost(host string) bool {
+	if isMetadataAddr(host) {
+		return true
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	for _, ip := range ips {
+		if isMetadataAddr(ip.String()) {
+			return true
+		}
+	}
+	return false
+}
+
+// withLocalHostGuard 只接受回环 Host，并拒绝跨站请求，缓解本地代理的盲 CSRF。
 func withLocalHostGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
@@ -415,8 +452,41 @@ func withLocalHostGuard(next http.Handler) http.Handler {
 			http.Error(w, "Forbidden: unexpected Host header", http.StatusForbidden)
 			return
 		}
+
+		fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+		if fetchSite == "cross-site" {
+			http.Error(w, "Forbidden: cross-site proxy request", http.StatusForbidden)
+			return
+		}
+		unsafe := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
+		origin := r.Header.Get("Origin")
+		if origin != "" && !sameLoopbackOrigin(origin) {
+			http.Error(w, "Forbidden: unexpected Origin", http.StatusForbidden)
+			return
+		}
+		if unsafe && origin == "" && fetchSite != "same-origin" && fetchSite != "same-site" {
+			http.Error(w, "Forbidden: missing request origin", http.StatusForbidden)
+			return
+		}
+		if fetchSite == "" && origin == "" && r.Header.Get("Referer") != "" && unsafe {
+			http.Error(w, "Forbidden: unverifiable request origin", http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func sameLoopbackOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // newProxyTransport 让每个连接都拨到 Transport 自己解析出来的目标。
@@ -650,6 +720,10 @@ func followRedirect(resp *http.Response, up *upstream) {
 	if lu.Scheme != "http" && lu.Scheme != "https" {
 		return
 	}
+	if isBlockedRedirectHost(lu.Hostname()) {
+		resp.Header.Set("Cache-Control", "no-store")
+		return
+	}
 	resp.Header.Set("Cache-Control", "no-store")
 	redirected := false
 	scheme, addr := urlToAddr(lu)
@@ -680,7 +754,10 @@ func rewriteBody(resp *http.Response, variants []string) {
 		return
 	}
 	const maxBody = 8 << 20
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if resp.ContentLength < 0 || resp.ContentLength > maxBody {
+		return
+	}
+	body, err := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))

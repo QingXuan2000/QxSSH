@@ -334,6 +334,12 @@ func (a *Gateway) appFileTok(id string) string {
 	return tok
 }
 
+func (a *Gateway) dropAppFileTok(id string) {
+	a.appFileMu.Lock()
+	delete(a.appFileToks, id)
+	a.appFileMu.Unlock()
+}
+
 // handleListUserApps 返回内置应用加 apps 目录下的第三方应用，按 id 排序；
 // 单个目录清单损坏直接跳过，不让一个坏应用拖垮整个列表。
 func (a *Gateway) handleListUserApps(w http.ResponseWriter, r *http.Request) {
@@ -530,6 +536,7 @@ func (a *Gateway) handleInstallApp(w http.ResponseWriter, r *http.Request) {
 		}
 		// 与 zip 路径一致：覆盖安装吊销旧令牌、清空旧授权（QX-011）。
 		_ = a.invalidateAppTokens(m.ID)
+		a.dropAppFileTok(m.ID)
 		if err := a.store.ClearGrants(m.ID); err != nil {
 			a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
 		}
@@ -628,6 +635,7 @@ func (a *Gateway) installAndGrantZip(w http.ResponseWriter, data []byte, consent
 	// 覆盖安装视为新应用：吊销旧令牌并清空旧授权，防止木马包继承受害
 	// 应用的身份与已授权限（QX-011）。全新安装时这两步是空操作。
 	_ = a.invalidateAppTokens(m.ID)
+	a.dropAppFileTok(m.ID)
 	if err := a.store.ClearGrants(m.ID); err != nil {
 		a.log.Warn("clear old grants on install failed", "id", m.ID, "err", err.Error())
 	}
@@ -1020,6 +1028,7 @@ func (a *Gateway) handleUninstallApp(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	a.dropAppFileTok(id)
 	if err := a.store.ClearGrants(id); err != nil {
 		a.log.Warn("clear grants failed", "id", id, "err", err.Error())
 	}
@@ -1064,6 +1073,7 @@ func (a *Gateway) handleSetAppEnabled(w http.ResponseWriter, r *http.Request) {
 	// 重新启用不影响已签发的令牌之外的状态（世代号只增不减，无需回退）。
 	if !req.Enabled {
 		a.revokeAppTokens(req.ID, "app_disabled")
+		a.dropAppFileTok(req.ID)
 	}
 	a.log.Info("app enabled state changed", "id", req.ID, "enabled", req.Enabled)
 	writeJSON(w, appEnabledResp{OK: true, ID: req.ID, Enabled: req.Enabled})
