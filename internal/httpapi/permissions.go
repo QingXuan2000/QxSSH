@@ -117,9 +117,9 @@ var permCatalog = []permDef{
 
 	// 10. 网络与代理
 	{ID: "tunnel:list", Group: "network", Label: "查看端口转发列表", LabelKey: "core.perm.tunnel.list", Desc: "读取当前运行中的 SSH 端口转发通道与内网 Web 代理服务列表及状态", DescKey: "core.perm.tunnel.list.desc", Danger: 1},
-	{ID: "tunnel:start", Group: "network", Label: "启动SSH端口转发", LabelKey: "core.perm.tunnel.start", Desc: "启动远端 SSH 端口转发通道", DescKey: "core.perm.tunnel.start.desc", Danger: 3},
+	{ID: "tunnel:start", Group: "network", Label: "启动TCP远端转发", LabelKey: "core.perm.tunnel.start", Desc: "仅可代偿 tunnel:tcp:remote，不能启动本机、动态或 UDP 转发", DescKey: "core.perm.tunnel.start.desc", Danger: 3},
 	{ID: "tunnel:stop", Group: "network", Label: "停止SSH端口转发", LabelKey: "core.perm.tunnel.stop", Desc: "停止正在运行的远端 SSH 端口转发通道", DescKey: "core.perm.tunnel.stop.desc", Danger: 2},
-	{ID: "tunnel:local", Group: "network", Label: "本机建立端口转发", LabelKey: "core.perm.tunnel.local", Desc: "在本机监听端口，把流量经 SSH 转发到目标主机（或 SOCKS5 代理）", DescKey: "core.perm.tunnel.local.desc", Danger: 3},
+	{ID: "tunnel:local", Group: "network", Label: "本机建立端口转发", LabelKey: "core.perm.tunnel.local", Desc: "兼容 local、dynamic 与 proto=udp；也可改用 TCP/UDP 细粒度节点精确授权", DescKey: "core.perm.tunnel.local.desc", Danger: 3},
 	{ID: "tunnel:tcp:local", Group: "network", Label: "启动TCP本机转发", LabelKey: "core.perm.tunnel.tcp.local", Desc: "在本机监听端口，把 TCP 流量经 SSH 转发到远端目标地址（-L）", DescKey: "core.perm.tunnel.tcp.local.desc", Danger: 3},
 	{ID: "tunnel:tcp:remote", Group: "network", Label: "启动TCP远端转发", LabelKey: "core.perm.tunnel.tcp.remote", Desc: "让远端主机监听端口，把 TCP 流量经 SSH 转发回目标地址（-R）", DescKey: "core.perm.tunnel.tcp.remote.desc", Danger: 3},
 	{ID: "tunnel:tcp:socks", Group: "network", Label: "启动SOCKS5动态代理", LabelKey: "core.perm.tunnel.tcp.socks", Desc: "在本机端口上开 SOCKS5 动态代理，按需经 SSH 连到任意远端地址（-D）", DescKey: "core.perm.tunnel.tcp.socks.desc", Danger: 3},
