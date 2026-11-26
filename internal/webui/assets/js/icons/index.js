@@ -82,7 +82,9 @@ export function icon(name, cls = 'qicon') {
   const custom = CUSTOM_PATHS[n];
   if (custom) {
     if (custom.startsWith('<svg')) return custom.replace('<svg', `<svg class="${cls}" aria-hidden="true"`);
-    return renderSvg(cls, custom);
+    // 自绘路径统一按 24×24 网格书写；必须补 viewBox，否则 svg 会按 1 单位 = 1px
+    // 直接绘制，图标被放大约一倍并溢出（例如文件管理器菜单里的终端图标会变成大箭头）。
+    return renderSvg(cls, custom, '0 0 24 24');
   }
   const key = lucideKey(n);
   if (!key) {
