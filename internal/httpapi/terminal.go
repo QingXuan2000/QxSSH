@@ -189,13 +189,7 @@ func (a *Gateway) serveSessionWS(w http.ResponseWriter, r *http.Request, hostID,
 
 	cols, rows := wsSize(r)
 
-	if loc := posixLocale(r.URL.Query().Get("lang")); loc != "" {
-		for _, kv := range [][2]string{{"LANG", loc}, {"LC_ALL", loc}} {
-			if err := sess.Setenv(kv[0], kv[1]); err != nil {
-				a.log.Debug("terminal locale not accepted by sshd (AcceptEnv)", "name", kv[0], "error", err.Error())
-			}
-		}
-	}
+	loc := posixLocale(r.URL.Query().Get("lang"))
 	if err := sess.Setenv("COLORTERM", "truecolor"); err != nil {
 		a.log.Debug("terminal COLORTERM not accepted by sshd (AcceptEnv)", "error", err.Error())
 	}
@@ -233,14 +227,10 @@ func (a *Gateway) serveSessionWS(w http.ResponseWriter, r *http.Request, hostID,
 		return
 	}
 
-	if command == "" && cwd != "" {
-		command = "cd -- " + shellQuote(cwd) + `; exec "${SHELL:-/bin/sh}" -l`
-	}
 	if command == "" {
-		err = sess.Shell()
-	} else {
-		err = sess.Start(command)
+		command = terminalCommand(cwd, loc)
 	}
+	err = sess.Start(command)
 	if err != nil {
 		http.Error(w, "shell: "+err.Error(), http.StatusBadGateway)
 		return
